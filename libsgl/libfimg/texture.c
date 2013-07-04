@@ -35,6 +35,7 @@
 fimgTexture *fimgCreateTexture(void)
 {
 	fimgTexture *texture;
+	fimgTexControl *ctl;
 
 	texture = malloc(sizeof(*texture));
 	if(texture == NULL)
@@ -42,10 +43,12 @@ fimgTexture *fimgCreateTexture(void)
 
 	memset(texture, 0, sizeof(*texture));
 
-	texture->control.useMipmap = FGTU_TSTA_MIPMAP_LINEAR;
-	texture->control.magFilter = FGTU_TSTA_FILTER_LINEAR;
-	texture->control.alphaFmt = FGTU_TSTA_AFORMAT_RGBA;
-	texture->control.type = FGTU_TSTA_TYPE_2D;
+	ctl = (fimgTexControl *)&texture->hw.control;
+	ctl->val = 0;
+	ctl->useMipmap = FGTU_TSTA_MIPMAP_LINEAR;
+	ctl->magFilter = FGTU_TSTA_FILTER_LINEAR;
+	ctl->alphaFmt = FGTU_TSTA_AFORMAT_RGBA;
+	ctl->type = FGTU_TSTA_TYPE_2D;
 
 	return texture;
 }
@@ -69,10 +72,12 @@ void fimgDestroyTexture(fimgTexture *texture)
 void fimgInitTexture(fimgTexture *texture, unsigned int flags,
 				unsigned int format, unsigned long addr)
 {
-	texture->reserved2 = flags;
-	texture->control.textureFmt = format;
-	texture->control.alphaFmt = !!(flags & FGTU_TEX_RGBA);
-	texture->baseAddr = addr;
+	fimgTexControl *ctl = (fimgTexControl *)&texture->hw.control;
+
+	texture->flags = flags;
+	ctl->textureFmt = format;
+	ctl->alphaFmt = !!(flags & FGTU_TEX_RGBA);
+	texture->gem = addr;
 }
 
 /**
@@ -87,7 +92,7 @@ void fimgSetTexMipmapOffset(fimgTexture *texture, unsigned int level,
 	if(level < 1 || level > FGTU_MAX_MIPMAP_LEVEL)
 		return;
 
-	texture->offset[level - 1] = offset;
+	texture->hw.offset[level - 1] = offset;
 }
 
 /**
@@ -101,16 +106,7 @@ unsigned int fimgGetTexMipmapOffset(fimgTexture *texture, unsigned level)
 	if(level < 1 || level > FGTU_MAX_MIPMAP_LEVEL)
 		return 0;
 
-	return texture->offset[level - 1];
-}
-
-/**
- * Marks texture cache to be invalidated on next rendering.
- * @param ctx Hardware context.
- */
-void fimgInvalidateTextureCache(fimgContext *ctx)
-{
-	ctx->invalTexCache = 1;
+	return texture->hw.offset[level - 1];
 }
 
 /**
@@ -130,12 +126,11 @@ void fimgSetupTexture(fimgContext *ctx, fimgTexture *texture, unsigned unit)
 	submit.nr_requests = 1;
 
 	req.type = G3D_REQUEST_TEXTURE_SETUP;
-	req.data = texture;
-	req.length = sizeof(*texture);
-#warning Unimplemented
-	req.texture.flags = 0; /* TODO */
+	req.data = &texture->hw;
+	req.length = sizeof(texture->hw);
+	req.texture.flags = texture->flags;
 	req.texture.unit = unit;
-	req.texture.handle = 0; /* TODO */
+	req.texture.handle = texture->gem;
 
 	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
 	if (ret < 0)
@@ -149,17 +144,7 @@ void fimgSetupTexture(fimgContext *ctx, fimgTexture *texture, unsigned unit)
  */
 void fimgSetTexMipmapLevel(fimgTexture *texture, int level)
 {
-	texture->maxLevel = level;
-}
-
-/**
- * Sets texture base address of texture object.
- * @param texture Texture object.
- * @param addr Physical address of texture data.
- */
-void fimgSetTexBaseAddr(fimgTexture *texture, unsigned int addr)
-{
-	texture->baseAddr = addr;
+	texture->hw.max_level = level;
 }
 
 /**
@@ -172,9 +157,9 @@ void fimgSetTexBaseAddr(fimgTexture *texture, unsigned int addr)
 void fimgSetTex2DSize(fimgTexture *texture,
 		unsigned int uSize, unsigned int vSize, unsigned int maxLevel)
 {
-	texture->uSize = uSize;
-	texture->vSize = vSize;
-	texture->maxLevel = maxLevel;
+	texture->hw.width = uSize;
+	texture->hw.height = vSize;
+	texture->hw.max_level = maxLevel;
 }
 
 /**
@@ -187,9 +172,9 @@ void fimgSetTex2DSize(fimgTexture *texture,
 void fimgSetTex3DSize(fimgTexture *texture, unsigned int vSize,
 				unsigned int uSize, unsigned int pSize)
 {
-	texture->uSize = uSize;
-	texture->vSize = vSize;
-	texture->pSize = pSize;
+	texture->hw.width = uSize;
+	texture->hw.height = vSize;
+	texture->hw.depth = pSize;
 }
 
 /**
@@ -199,7 +184,9 @@ void fimgSetTex3DSize(fimgTexture *texture, unsigned int vSize,
  */
 void fimgSetTexUAddrMode(fimgTexture *texture, unsigned mode)
 {
-	texture->control.uAddrMode = mode;
+	fimgTexControl *ctl = (fimgTexControl *)&texture->hw.control;
+
+	ctl->uAddrMode = mode;
 }
 
 /**
@@ -209,7 +196,9 @@ void fimgSetTexUAddrMode(fimgTexture *texture, unsigned mode)
  */
 void fimgSetTexVAddrMode(fimgTexture *texture, unsigned mode)
 {
-	texture->control.vAddrMode = mode;
+	fimgTexControl *ctl = (fimgTexControl *)&texture->hw.control;
+
+	ctl->vAddrMode = mode;
 }
 
 /**
@@ -219,7 +208,9 @@ void fimgSetTexVAddrMode(fimgTexture *texture, unsigned mode)
  */
 void fimgSetTexPAddrMode(fimgTexture *texture, unsigned mode)
 {
-	texture->control.pAddrMode = mode;
+	fimgTexControl *ctl = (fimgTexControl *)&texture->hw.control;
+
+	ctl->pAddrMode = mode;
 }
 
 /**
@@ -229,7 +220,9 @@ void fimgSetTexPAddrMode(fimgTexture *texture, unsigned mode)
  */
 void fimgSetTexMinFilter(fimgTexture *texture, unsigned mode)
 {
-	texture->control.minFilter = mode;
+	fimgTexControl *ctl = (fimgTexControl *)&texture->hw.control;
+
+	ctl->minFilter = mode;
 }
 
 /**
@@ -239,7 +232,9 @@ void fimgSetTexMinFilter(fimgTexture *texture, unsigned mode)
  */
 void fimgSetTexMagFilter(fimgTexture *texture, unsigned mode)
 {
-	texture->control.magFilter = mode;
+	fimgTexControl *ctl = (fimgTexControl *)&texture->hw.control;
+
+	ctl->magFilter = mode;
 }
 
 /**
@@ -249,7 +244,9 @@ void fimgSetTexMagFilter(fimgTexture *texture, unsigned mode)
  */
 void fimgSetTexMipmap(fimgTexture *texture, unsigned mode)
 {
-	texture->control.useMipmap = mode;
+	fimgTexControl *ctl = (fimgTexControl *)&texture->hw.control;
+
+	ctl->useMipmap = mode;
 }
 
 /**
@@ -259,5 +256,7 @@ void fimgSetTexMipmap(fimgTexture *texture, unsigned mode)
  */
 void fimgSetTexCoordSys(fimgTexture *texture, unsigned mode)
 {
-	texture->control.texCoordSys = mode;
+	fimgTexControl *ctl = (fimgTexControl *)&texture->hw.control;
+
+	ctl->texCoordSys = mode;
 }

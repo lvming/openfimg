@@ -252,16 +252,9 @@ typedef union {
 } fimgVtxTexControl;
 
 struct _fimgTexture {
-	fimgTexControl control;
-	unsigned int uSize;
-	unsigned int vSize;
-	unsigned int pSize;
-	unsigned int offset[FGTU_MAX_MIPMAP_LEVEL];
-	unsigned int minLevel;
-	unsigned int maxLevel;
-	unsigned int baseAddr;
-	unsigned int reserved1;
-	unsigned int reserved2;
+	struct drm_exynos_g3d_texture hw;
+	unsigned gem;
+	unsigned flags;
 };
 
 /*

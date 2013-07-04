@@ -700,27 +700,8 @@ public:
 				uint32_t width, uint32_t height) :
 		FGLRenderSurface(dpy, config, colorFormat, depthFormat)
 	{
-		const FGLPixelFormat *fmt = FGLPixelFormat::get(colorFormat);
-		unsigned int size = width * height * fmt->pixelSize;
-
 		this->width = width;
 		this->height = height;
-
-		color = new FGLLocalSurface(size);
-		if (!color || !color->isValid()) {
-			setError(EGL_BAD_ALLOC);
-			return;
-		}
-
-		if (depthFormat) {
-			size = width * height * 4;
-
-			depth = new FGLLocalSurface(size);
-			if (!depth || !depth->isValid()) {
-				setError(EGL_BAD_ALLOC);
-				return;
-			}
-		}
 	}
 
 	virtual ~FGLPbufferSurface() {}
@@ -731,6 +712,37 @@ public:
 			return false;
 
 		return color && color->isValid();
+	}
+
+	virtual bool allocate(FGLContext *ctx)
+	{
+		const FGLPixelFormat *fmt = FGLPixelFormat::get(colorFormat);
+		unsigned int size = width * height * fmt->pixelSize;
+
+		if (color)
+			return EGL_TRUE;
+
+		color = new FGLLocalSurface(size);
+		if (!color || !color->isValid()) {
+			setError(EGL_BAD_ALLOC);
+			return EGL_FALSE;
+		}
+
+		if (depthFormat) {
+			size = width * height * 4;
+
+			depth = new FGLLocalSurface(size);
+			if (!depth || !depth->isValid()) {
+				setError(EGL_BAD_ALLOC);
+				return EGL_FALSE;
+			}
+		}
+	}
+
+	virtual void free(void)
+	{
+		delete depth;
+		delete color;
 	}
 };
 
@@ -1102,8 +1114,7 @@ static void fglUnbindContext(FGLContext *c)
 
 	/* Unbind draw surface */
 	FGLRenderSurface *d = (FGLRenderSurface *)c->egl.draw;
-	d->disconnect();
-	d->ctx = EGL_NO_CONTEXT;
+	d->unbindContext();
 	c->egl.draw = EGL_NO_SURFACE;
 
 	/* Delete it if it's terminated */
@@ -1161,11 +1172,9 @@ static EGLBoolean fglMakeCurrent(FGLContext *gl, FGLRenderSurface *d)
 
 	/* Attach draw surface */
 	gl->egl.draw = (EGLSurface)d;
-	if (!d->connect())
+	if (!d->bindContext(gl))
 		/* Error should have been set for us. */
 		return EGL_FALSE;
-	d->ctx = (EGLContext)gl;
-	d->bindDrawSurface(gl);
 
 	/* Make the new context current */
 	setGlThreadSpecific(gl);
@@ -1334,7 +1343,7 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
 	/* if it's bound to a context, update the buffer */
 	if (d->ctx != EGL_NO_CONTEXT) {
 		FGLContext *c = (FGLContext *)d->ctx;
-		d->bindDrawSurface(c);
+		d->bindContext(c);
 	}
 
 	return EGL_TRUE;

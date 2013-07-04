@@ -224,147 +224,6 @@ const FGLConfigs gPlatformConfigs[] = {
 /** Number of exported EGL configurations */
 const int gPlatformConfigsNum = NELEM(gPlatformConfigs);
 
-/*
- * Frame buffer operations
- */
-
-/**
- * Framebuffer surface.
- * Implements FGLSurface interface on top of a standard Linux framebuffer.
- * Used to provide access to framebuffer memory inside EGL and GLES.
- */
-class FGLFramebufferSurface : public FGLSurface {
-public:
-	/**
-	 * Class constructor.
-	 * @param paddr Physical address of framebuffer memory.
-	 * @param vaddr Virtual address of framebuffer memory.
-	 * @param length Size of framebuffer memory in bytes.
-	 */
-	FGLFramebufferSurface(unsigned long paddr,
-					void *vaddr, unsigned long length) :
-		FGLSurface(paddr, vaddr, length) {}
-	/** Class destructor. */
-	virtual ~FGLFramebufferSurface() {}
-
-	virtual void flush(void) {}
-
-	virtual int lock(int usage = 0)
-	{
-		return 0;
-	}
-
-	virtual int unlock(void)
-	{
-		return 0;
-	}
-
-	virtual bool isValid(void)
-	{
-		return true;
-	}
-};
-
-/**
- * Framebuffer memory manager class.
- * Implements multiple buffering using available framebuffer memory.
- */
-class FGLFramebufferManager {
-	int _fd;
-	int _count;
-	int *_buffers;
-	int _write;
-	int _read;
-	bool _empty;
-public:
-	/**
-	 * Class constructor.
-	 * @param fd File descriptor of the framebuffer.
-	 * @param bufCount Number of buffers to create.
-	 * @param yres Vertical resolution of each buffer.
-	 */
-	FGLFramebufferManager(int fd, int bufCount, int yres);
-	/** Class destructor. */
-	~FGLFramebufferManager();
-
-	/**
-	 * Shows given buffer on the screen.
-	 * @param yoffset Vertical offset of the buffer.
-	 * @return 0 on success, negative on error.
-	 */
-	int put(unsigned int yoffset);
-	/**
-	 * Gets next buffer ready for rendering.
-	 * @return Vertical offset of received buffer.
-	 */
-	int get(void);
-};
-
-FGLFramebufferManager::FGLFramebufferManager(int fd, int bufCount, int yres) :
-	_fd(fd), _count(bufCount),
-	_write(0), _read(0), _empty(false)
-{
-	int i, offset;
-
-	_buffers = new int[bufCount];
-	for (i = 0, offset = 0; i < bufCount; ++i, offset += yres)
-		_buffers[i] = offset;
-}
-
-FGLFramebufferManager::~FGLFramebufferManager()
-{
-	delete[] _buffers;
-}
-
-/** Define to block until the buffer gets physically showed on the screen. */
-#define FRAMEBUFFER_USE_VSYNC
-
-int FGLFramebufferManager::put(unsigned int yoffset)
-{
-	if (!_empty && _read == _write)
-		return -1;
-
-	fb_var_screeninfo vinfo;
-
-	if (ioctl(_fd, FBIOGET_VSCREENINFO, &vinfo) < 0)
-		LOGE("%s: FBIOGET_VSCREENINFO failed.", __func__);
-	vinfo.yoffset = yoffset;
-	if (ioctl(_fd, FBIOPAN_DISPLAY, &vinfo) < 0)
-		LOGE("%s: FBIOPAN_DISPLAY failed.", __func__);
-
-#ifdef FRAMEBUFFER_USE_VSYNC
-	int crtc = 0;
-	if (ioctl(_fd, FBIO_WAITFORVSYNC, &crtc) < 0)
-		LOGW("%s: FBIO_WAITFORVSYNC failed.", __func__);
-#endif
-
-	_buffers[_write++] = yoffset;
-	_write %= _count;
-	_empty = false;
-
-	return 0;
-}
-
-int FGLFramebufferManager::get(void)
-{
-	int ret;
-
-	if (_empty)
-		return -1;
-
-	ret = _buffers[_read++];
-	_read %= _count;
-
-	if (_read == _write)
-		_empty = true;
-
-	return ret;
-}
-
-/*
- * Frame buffer window surface
- */
-
 /**
  * Framebuffer window render surface.
  * Provides framebuffer for rendering operations directly from Linux
@@ -373,15 +232,10 @@ int FGLFramebufferManager::get(void)
 class FGLFramebufferWindowSurface : public FGLRenderSurface {
 	int	bytesPerPixel;
 	int	fd;
-	int	bufferCount;
-	int	yoffset;
+	FGLLocalSurface *buffers;
 
-	unsigned long	pbase;
 	void		*vbase;
 	unsigned long	vlen;
-	unsigned long	lineLength;
-
-	FGLFramebufferManager *manager;
 
 public:
 	/**
@@ -400,92 +254,21 @@ public:
 		bytesPerPixel(0),
 		fd(fileDesc)
 	{
-		fb_var_screeninfo vinfo;
-		fb_fix_screeninfo finfo;
-
-		ioctl(fd, FBIOGET_VSCREENINFO, &vinfo);
-		ioctl(fd, FBIOGET_FSCREENINFO, &finfo);
-
-		width		= vinfo.xres;
-		height		= vinfo.yres;
-		bytesPerPixel	= vinfo.bits_per_pixel / 8;
-		bufferCount	= 2;
-		pbase		= finfo.smem_start;
-		lineLength	= finfo.line_length;
-
-		vinfo.yres_virtual = 2*vinfo.yres;
-		if (ioctl(fd, FBIOPUT_VSCREENINFO, &vinfo) < 0) {
-			vinfo.yres_virtual = vinfo.yres;
-			bufferCount = 1;
-			LOGW("FBIOPUT_VSCREENINFO failed, page flipping not supported");
-		}
-
-		unsigned long fbSize = vinfo.yres_virtual * finfo.line_length;
-		unsigned long pageSize = getpagesize();
-		vlen = (fbSize + pageSize - 1) & ~(pageSize - 1);
-
-		vbase = mmap(NULL, vlen, PROT_READ|PROT_WRITE,
-							MAP_SHARED, fd, 0);
-		if (vbase == MAP_FAILED) {
-			vbase = 0;
-			LOGE("mmap failed");
-			setError(EGL_BAD_ALLOC);
-			return;
-		}
-
-		manager = new FGLFramebufferManager(fd, bufferCount, height); 
 	}
 
 	/** Class destructor. */
 	~FGLFramebufferWindowSurface()
 	{
-		if (vbase != NULL)
-			munmap(vbase, vlen);
-		delete manager;
-		delete color;
-		delete depth;
 	}
 
 	virtual bool swapBuffers()
 	{
-		FGLSurface *newColor;
-		int newYOffset;
-
-		if (bufferCount < 2) {
-			setError(EGL_BAD_ACCESS);
-			return false;
-		}
-
-		newYOffset = manager->get();
-		if (newYOffset < 0) {
-			setError(EGL_BAD_ALLOC);
-			return false;
-		}
-
-		unsigned long phys = pbase + newYOffset*lineLength;
-		char *virt = (char *)vbase + newYOffset*lineLength;
-		unsigned int size = height*lineLength;
-		newColor = new FGLFramebufferSurface(phys, virt, size);
-		if (!newColor || !newColor->isValid()) {
-			delete newColor;
-			newColor = 0;
-			manager->put(newYOffset);
-			setError(EGL_BAD_ALLOC);
-			return false;
-		}
-
-		if (color) {
-			manager->put(yoffset);
-			delete color;
-		}
-
-		color = newColor;
-		yoffset = newYOffset;
+		/* TODO: Swap buffers */
 
 		return true;
 	}
 
-	virtual bool connect()
+	virtual bool allocate(FGLContext *fgl)
 	{
 		if (depthFormat) {
 			unsigned int size = width * height * 4;
@@ -498,43 +281,14 @@ public:
 			}
 		}
 
-		if (color) {
-			manager->put(yoffset);
-			delete color;
-			color = 0;
-		}
-
-		yoffset = manager->get();
-		if (yoffset < 0) {
-			setError(EGL_BAD_ALLOC);
-			return false;
-		}
-
-		unsigned long phys = pbase + yoffset*lineLength;
-		char *virt = (char *)vbase + yoffset*lineLength;
-		unsigned int size = height*lineLength;
-		color = new FGLFramebufferSurface(phys, virt, size);
-		if (!color || !color->isValid()) {
-			delete color;
-			color = 0;
-			manager->put(yoffset);
-			setError(EGL_BAD_ALLOC);
-			return false;
-		}
+		/* TODO: Allocate backing storage for color buffer */
 
 		return true;
 	}
 
-	virtual void disconnect()
+	virtual void free()
 	{
-		if (color) {
-			manager->put(yoffset);
-			delete color;
-			color = 0;
-		}
-
-		delete depth;
-		depth = 0;
+		/* TODO: ree backing storage */
 	}
 
 	virtual bool initCheck() const
@@ -646,11 +400,7 @@ FGLRenderSurface *platformCreateWindowSurface(EGLDisplay dpy,
 	fb_var_screeninfo vinfo;
 	int fd = (int)window;
 
-	if (ioctl(fd, FBIOGET_VSCREENINFO, &vinfo) < 0) {
-		LOGE("%s: Invalid native window handle specified", __func__);
-		setError(EGL_BAD_NATIVE_WINDOW);
-		return NULL;
-	}
+	/* TODO: Get screen information */
 
 	if (!fglNativeToFGLPixelFormat(&vinfo, &pixelFormat)) {
 		setError(EGL_BAD_MATCH);

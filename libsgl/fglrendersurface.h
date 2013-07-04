@@ -58,7 +58,7 @@ public:
 	/** EGL configuration used by this render surface. */
 	uint32_t	config;
 	/** EGL context bound currently to this render surface. */
-	EGLContext	ctx;
+	FGLContext	*ctx;
 
 	/**
 	 * Constructs render surface base.
@@ -91,16 +91,57 @@ public:
 	}
 
 	/**
+	 * Allocates buffers backing the surface.
+	 * @param gl Rendering context to allocate on behalf of.
+	 * @return EGL_TRUE on success, EGL_FALSE on failure.
+	 */
+	virtual bool allocate(FGLContext *gl) = 0;
+
+	virtual void free(void) = 0;
+
+	/**
 	 * Binds render surface to given rendering context.
 	 * @param gl Rendering context.
 	 * @return EGL_TRUE on success, EGL_FALSE on failure.
 	 */
-	virtual bool bindDrawSurface(FGLContext *gl)
+	bool bindContext(FGLContext *gl)
 	{
+		if (ctx) {
+			LOGE("tried to bind context to an already bound surface");
+			return EGL_FALSE;
+		}
+
+		if (!color && !allocate(gl))
+			return EGL_FALSE;
+
+		if (color)
+			color->bindContext(gl);
+		if (depth)
+			depth->bindContext(gl);
+
+		/* TODO - move this to bindContext() of surfaces */
 		fglSetColorBuffer(gl, color, width, height, colorFormat);
 		fglSetDepthStencilBuffer(gl, depth, width, height, depthFormat);
 
+		ctx = gl;
 		return EGL_TRUE;
+	}
+
+	/**
+	 * Unbinds render surface from rendering context bound to it.
+	 */
+	void unbindContext(void)
+	{
+		if (!ctx)
+			return;
+
+		if (color)
+			color->unbindContext();
+		if (depth)
+			depth->unbindContext();
+
+		free();
+		ctx = 0;
 	}
 
 	/**
@@ -144,13 +185,6 @@ public:
 		return EGL_FALSE;
 	}
 
-	/**
-	 * Connects the surface to backing storage.
-	 * @return EGL_TRUE on success, EGL_FALSE on failure.
-	 */
-	virtual bool connect() { return EGL_TRUE; }
-	/** Disconnects the surface from backing storage. */
-	virtual void disconnect() {}
 	/**
 	 * Determines buffer swap behavior of the surface.
 	 * @return Swap behavior value as specified by EGL specification.

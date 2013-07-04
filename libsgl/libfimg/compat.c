@@ -1386,12 +1386,16 @@ void fimgCompatSetEnvColor(fimgContext *ctx, uint32_t unit,
  * @param tex Texture object.
  * @param unit Index of texture unit.
  */
-void fimgCompatSetupTexture(fimgContext *ctx, fimgTexture *tex, uint32_t unit)
+void fimgCompatSetupTexture(fimgContext *ctx, fimgTexture *tex,
+					uint32_t unit, int dirty)
 {
 	ctx->compat.texture[unit].texture = tex;
-	if (tex)
+	if (tex) {
 		FGFP_BITFIELD_SET(ctx->compat.psState.tex[unit],
-				TEX_SWAP, !!(tex->reserved2 & FGTU_TEX_BGR));
+				TEX_SWAP, !!(tex->flags & FGTU_TEX_BGR));
+		if (dirty)
+			tex->flags |= G3D_TEXTURE_DIRTY;
+	}
 }
 
 /**

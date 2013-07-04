@@ -47,45 +47,44 @@
  * Surfaces
  */
 
-FGLLocalSurface::FGLLocalSurface(unsigned long req_size)
-	: fd(-1)
+bool FGLSurface::bindContext(FGLContext *ctx)
 {
-	pmem_region region;
-	unsigned long page_size = getpagesize();
+	int ret;
 
-	/* Round up to page size */
-	size = (req_size + page_size - 1) & ~(page_size - 1);
+	if (ctx)
+		return false;
 
-	/* Create a buffer file (cached) */
-	fd = open("/dev/pmem_gpu1", O_RDWR, 0);
-	if(fd < 0) {
-		LOGE("EGL: Could not open PMEM device (%s)", strerror(errno));
+	if (fd < 0 || !allocate(ctx))
+		return false;
+
+	ret = fimgImportGEM(ctx->fimg, fd, &handle);
+	if (ret)
+		return false;
+
+	vaddr = fimgMapGEM(ctx->fimg, handle, size);
+	if (!vaddr)
+		return false;
+
+	this->ctx = ctx;
+
+	return true;
+}
+
+void FGLSurface::unbindContext(void)
+{
+	if (!ctx)
 		return;
-	}
 
-	/* Allocate and map the memory */
-	vaddr = mmap(NULL, size, PROT_WRITE | PROT_READ, MAP_SHARED, fd, 0);
-	if (vaddr == MAP_FAILED) {
-		LOGE("EGL: PMEM buffer allocation failed (%s)", strerror(errno));
-		goto err_mmap;
-	}
-
-	/* Get physical address */
-	if (ioctl(fd, PMEM_GET_PHYS, &region) < 0) {
-		LOGE("EGL: PMEM_GET_PHYS failed (%s)", strerror(errno));
-		goto err_phys;
-	}
-	this->paddr = region.offset;
-
-	/* Allocation succeeded */
-	return;
-
-err_phys:
 	munmap(vaddr, size);
-err_mmap:
-	close(fd);
-	/* Allocation failed */
-	fd = -1;
+	fimgDestroyGEMHandle(ctx->fimg, handle);
+
+	ctx = 0;
+	handle = 0;
+}
+
+FGLLocalSurface::FGLLocalSurface(unsigned long req_size)
+{
+	size = req_size;
 }
 
 FGLLocalSurface::~FGLLocalSurface()
@@ -93,8 +92,25 @@ FGLLocalSurface::~FGLLocalSurface()
 	if (!isValid())
 		return;
 
-	munmap(vaddr, size);
-	close(fd);
+	fimgDestroyGEMHandle(ctx->fimg, handle);
+}
+
+bool FGLLocalSurface::allocate(FGLContext *ctx)
+{
+	int ret;
+
+	ret = fimgCreateGEM(ctx->fimg, size, &handle);
+	if (ret < 0)
+		return false;
+
+	ret = fimgExportGEM(ctx->fimg, handle);
+	if (ret < 0) {
+		fimgDestroyGEMHandle(ctx->fimg, handle);
+		return false;
+	}
+
+	fd = ret;
+	return true;
 }
 
 int FGLLocalSurface::lock(int usage)
@@ -109,20 +125,13 @@ int FGLLocalSurface::unlock(void)
 
 void FGLLocalSurface::flush(void)
 {
-	struct pmem_region region;
 
-	region.offset = 0;
-	region.len = size;
-
-	if (ioctl(fd, PMEM_CACHE_FLUSH, &region) != 0)
-		LOGW("Could not flush PMEM surface %d", fd);
 }
 
-FGLExternalSurface::FGLExternalSurface(void *v, intptr_t p, size_t s)
+FGLExternalSurface::FGLExternalSurface(void *v, uint32_t h, off_t o, size_t s) :
+	FGLSurface(h, o, s)
 {
-	vaddr = v;
-	paddr = p;
-	size = s;
+
 }
 
 FGLExternalSurface::~FGLExternalSurface()
@@ -142,5 +151,5 @@ int FGLExternalSurface::unlock(void)
 
 void FGLExternalSurface::flush(void)
 {
-	__clear_cache((char *)vaddr, (char *)vaddr + size);
+
 }

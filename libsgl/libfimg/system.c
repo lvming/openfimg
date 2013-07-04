@@ -138,7 +138,27 @@ void fimgDestroyContext(fimgContext *ctx)
  */
 int fimgWaitForFlush(fimgContext *ctx, uint32_t target)
 {
-#warning Unimplemented
+	struct drm_exynos_g3d_submit submit;
+	struct drm_exynos_g3d_request req;
+	int ret;
+
+	submit.requests = &req;
+	submit.nr_requests = 1;
+
+	req.type = G3D_REQUEST_FENCE;
+	req.fence.flags = G3D_FENCE_FLUSH;
+
+	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
+	if (ret < 0) {
+		LOGE("G3D_REQUEST_FENCE failed (%d)", ret);
+		return ret;
+	}
+
+	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_WAIT);
+	if (ret < 0) {
+		LOGE("DRM_IOCTL_EXYNOS_G3D_WAIT failed (%d)", ret);
+		return ret;
+	}
 
 	return 0;
 }
@@ -193,4 +213,73 @@ void fimgFlushContext(fimgContext *ctx)
 #ifdef FIMG_FIXED_PIPELINE
 	fimgCompatFlush(ctx);
 #endif
+}
+
+/*
+ * Memory management (GEM)
+ */
+
+int fimgCreateGEM(fimgContext *ctx, unsigned long size, unsigned int *handle)
+{
+	struct drm_exynos_gem_create req;
+	int ret;
+
+	req.size = size;
+	req.flags = EXYNOS_BO_CACHABLE;
+	req.handle = 0;
+
+	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_GEM_CREATE, &req);
+	if (ret < 0) {
+		LOGE("failed to create GEM (%d)", ret);
+		return ret;
+	}
+
+	*handle = req.handle;
+	return 0;
+}
+
+void fimgDestroyGEMHandle(fimgContext *ctx, unsigned int handle)
+{
+	struct drm_gem_close req;
+	int ret;
+
+	req.handle = handle;
+
+	ret = ioctl(ctx->fd, DRM_IOCTL_GEM_CLOSE, &req);
+	if (ret < 0)
+		LOGE("failed to destroy GEM (%d)", ret);
+}
+
+void *fimgMapGEM(fimgContext *ctx, unsigned int handle, unsigned long size)
+{
+	struct drm_exynos_gem_mmap req;
+	int ret;
+
+	req.handle = handle;
+	req.size = size;
+
+	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_GEM_MMAP, &req);
+	if (ret < 0) {
+		LOGE("failed to map GEM (%d)", ret);
+		return NULL;
+	}
+
+	return (void *)(unsigned long)req.mapped;
+}
+
+void fimgUnmapGEM(fimgContext *ctx, void *addr, unsigned long size)
+{
+	munmap(addr, size);
+}
+
+int fimgExportGEM(fimgContext *ctx, unsigned int handle)
+{
+	// TODO
+	return 0;
+}
+
+int fimgImportGEM(fimgContext *ctx, int fd, unsigned int *handle)
+{
+	// TODO
+	return 0;
 }
