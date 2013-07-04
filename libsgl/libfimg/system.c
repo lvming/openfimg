@@ -78,17 +78,19 @@ void fimgDeviceClose(fimgContext *ctx)
 fimgContext *fimgCreateContext(void)
 {
 	fimgContext *ctx;
-	uint32_t *queue;
+	struct g3d_state_entry *queue;
 
 	if ((ctx = calloc(1, sizeof(*ctx))) == NULL)
 		return NULL;
 
-	queue = calloc(FIMG_MAX_QUEUE_LEN + 1, 2 * sizeof(uint32_t));
+	queue = calloc(FIMG_MAX_QUEUE_LEN + 1, sizeof(*queue));
 	if (!queue) {
 		free(ctx);
 		return NULL;
 	}
+	ctx->queueLen = FIMG_MAX_QUEUE_LEN;
 	ctx->queueStart = queue;
+	ctx->queue = queue;
 
 	if(fimgDeviceOpen(ctx)) {
 		free(queue);
@@ -103,16 +105,6 @@ fimgContext *fimgCreateContext(void)
 #ifdef FIMG_FIXED_PIPELINE
 	fimgCreateCompatContext(ctx);
 #endif
-
-	LOGE("sizeof(ctx->hw.prot) = %u", sizeof(ctx->hw.prot));
-	LOGE("sizeof(ctx->hw.host) = %u", sizeof(ctx->hw.host));
-	LOGE("sizeof(ctx->hw.primitive) = %u", sizeof(ctx->hw.primitive));
-	LOGE("sizeof(ctx->hw.rasterizer) = %u", sizeof(ctx->hw.rasterizer));
-	LOGE("sizeof(ctx->hw.fragment) = %u", sizeof(ctx->hw.fragment));
-
-	/* Initialize registers */
-	ctx->queueLen = FIMG_MAX_QUEUE_LEN;
-	fimgQueueFlush(ctx);
 
 	return ctx;
 }
@@ -193,8 +185,10 @@ void fimgQueueFlush(fimgContext *ctx)
 	submit.requests = &req;
 	submit.nr_requests = 1;
 
-	/* Above the maximum length it's more effective to restore the whole
-	 * context than just the changed registers */
+	/*
+	 * Above the maximum length it's more efficient to restore the whole
+	 * context than just the changed registers
+	 */
 	if (ctx->queueLen == FIMG_MAX_QUEUE_LEN) {
 		req.type = G3D_REQUEST_STATE_INIT;
 		req.data = &ctx->hw;
@@ -203,25 +197,19 @@ void fimgQueueFlush(fimgContext *ctx)
 		ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
 		if (ret < 0)
 			LOGE("G3D_REQUEST_STATE_INIT failed (%d)", errno);
+	} else {
+		req.type = G3D_REQUEST_STATE_BUFFER;
+		req.data = &ctx->queueStart[1];
+		req.length = ctx->queueLen * sizeof(*ctx->queueStart);
 
-		ctx->queueLen = 0;
-		ctx->queue = ctx->queueStart;
-		ctx->queue[0] = 0;
-
-		return;
+		ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
+		if (ret < 0)
+			LOGE("G3D_REQUEST_STATE_BUFFER failed (%d)", errno);
 	}
-
-	req.type = G3D_REQUEST_STATE_BUFFER;
-	req.data = ctx->queueStart;
-	req.length = ctx->queueLen * sizeof(*ctx->queueStart) * 2;
-
-	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
-	if (ret < 0)
-		LOGE("G3D_REQUEST_STATE_INIT failed (%d)", errno);
 
 	ctx->queueLen = 0;
 	ctx->queue = ctx->queueStart;
-	ctx->queue[0] = 0;
+	ctx->queue->reg = G3D_NUM_REGISTERS;
 }
 
 /*

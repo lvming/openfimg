@@ -72,6 +72,8 @@ static inline void setVtxBufAttrib(fimgContext *ctx, unsigned char idx,
 	ctx->hw.host.vbbase[idx] = base;
 	ctx->hw.host.vbctrl[idx].stride = stride;
 	ctx->hw.host.vbctrl[idx].range = range;
+	fimgQueue(ctx, ctx->hw.host.vbctrl[idx].val, FGHI_ATTRIB_VBCTRL(idx));
+	fimgQueue(ctx, ctx->hw.host.vbbase[idx], FGHI_ATTRIB_VBBASE(idx));
 }
 
 /*
@@ -1563,31 +1565,17 @@ static void submitDraw(fimgContext *ctx, uint32_t count)
  */
 static void setupAttributes(fimgContext *ctx, fimgArray *arrays)
 {
-	fimgAttribute last;
 	unsigned int i;
 
 	// write attribute configuration
-	for (i = 0; i < ctx->numAttribs - 1; ++i)
+	for (i = 0; i < ctx->numAttribs - 1; ++i) {
+		ctx->hw.host.attrib[i].lastattr = 0;
 		fimgQueue(ctx, ctx->hw.host.attrib[i].val, FGHI_ATTRIB(i));
+	}
 
 	// write the last one
-	last = ctx->hw.host.attrib[i];
-	last.lastattr = 1;
-	fimgQueue(ctx, last.val, FGHI_ATTRIB(i));
-}
-
-/**
- * Configures hardware vertex buffer parameters.
- * @param ctx Hardware context.
- */
-static void setupVertexBuffer(fimgContext *ctx)
-{
-	unsigned int i;
-
-	for (i = 0; i < ctx->numAttribs; i++) {
-		fimgQueue(ctx, ctx->hw.host.vbctrl[i].val, FGHI_ATTRIB_VBCTRL(i));
-		fimgQueue(ctx, ctx->hw.host.vbbase[i], FGHI_ATTRIB_VBBASE(i));
-	}
+	ctx->hw.host.attrib[i].lastattr = 1;
+	fimgQueue(ctx, ctx->hw.host.attrib[i].val, FGHI_ATTRIB(i));
 }
 
 /**
@@ -1633,7 +1621,6 @@ void fimgDrawArrays(fimgContext *ctx, unsigned int mode,
 #endif
 
 	do {
-		setupVertexBuffer(ctx);
 		fimgQueueFlush(ctx);
 		submitDraw(ctx, copied);
 		copied = primitiveHandler[mode].direct(ctx,
@@ -1687,7 +1674,6 @@ void fimgDrawElementsUByteIdx(fimgContext *ctx, unsigned int mode,
 #endif
 
 	do {
-		setupVertexBuffer(ctx);
 		fimgQueueFlush(ctx);
 		submitDraw(ctx, copied);
 		copied = primitiveHandler[mode].indexed_8(ctx,
@@ -1741,7 +1727,6 @@ void fimgDrawElementsUShortIdx(fimgContext *ctx, unsigned int mode,
 #endif
 
 	do {
-		setupVertexBuffer(ctx);
 		fimgQueueFlush(ctx);
 		submitDraw(ctx, copied);
 		copied = primitiveHandler[mode].indexed_16(ctx,

@@ -449,8 +449,8 @@ struct _fimgContext {
 	unsigned int fbFlags;
 	int flipY;
 	/* Register queue */
-	unsigned int *queueStart;
-	unsigned int *queue;
+	struct g3d_state_entry *queueStart;
+	struct g3d_state_entry *queue;
 	unsigned int queueLen;
 	/* Lock state */
 	unsigned int locked;
@@ -463,10 +463,11 @@ struct _fimgContext {
 
 #define FIMG_MAX_QUEUE_LEN	64
 
-static inline void fimgQueue(fimgContext *ctx, unsigned int data, unsigned int addr)
+static inline void fimgQueue(fimgContext *ctx,
+				unsigned int data, enum g3d_register addr)
 {
-	if (ctx->queue[0] == addr) {
-		ctx->queue[1] = data;
+	if (ctx->queue->reg == addr) {
+		ctx->queue->val = data;
 		return;
 	}
 
@@ -475,16 +476,28 @@ static inline void fimgQueue(fimgContext *ctx, unsigned int data, unsigned int a
 	if (ctx->queueLen == FIMG_MAX_QUEUE_LEN)
 		return;
 
-	ctx->queue += 2;
-	ctx->queueLen++;
-	ctx->queue[0] = addr;
-	ctx->queue[1] = data;
+	++ctx->queue;
+	++ctx->queueLen;
+	ctx->queue->reg = addr;
+	ctx->queue->val = data;
 }
 
-static inline void fimgQueueF(fimgContext *ctx, float data, unsigned int addr)
+static inline uint32_t getRawFloat(float val)
 {
-	if (ctx->queue[0] == addr) {
-		((float *)ctx->queue)[1] = data;
+	union {
+		float val;
+		uint32_t raw;
+	} tmp;
+
+	tmp.val = val;
+	return tmp.raw;
+}
+
+static inline void fimgQueueF(fimgContext *ctx,
+					float data, enum g3d_register addr)
+{
+	if (ctx->queue->reg == addr) {
+		ctx->queue->val = getRawFloat(data);
 		return;
 	}
 
@@ -493,10 +506,10 @@ static inline void fimgQueueF(fimgContext *ctx, float data, unsigned int addr)
 	if (ctx->queueLen == FIMG_MAX_QUEUE_LEN)
 		return;
 
-	ctx->queue += 2;
-	ctx->queueLen++;
-	ctx->queue[0] = addr;
-	((float *)ctx->queue)[1] = data;
+	++ctx->queue;
+	++ctx->queueLen;
+	ctx->queue->reg = addr;
+	ctx->queue->val = getRawFloat(data);
 }
 
 extern void fimgQueueFlush(fimgContext *ctx);
