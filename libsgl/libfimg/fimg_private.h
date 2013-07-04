@@ -26,6 +26,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <errno.h>
+#include <stdint.h>
+#include <drm/exynos_drm.h>
 #include "platform.h"
 #include "fimg.h"
 
@@ -37,59 +39,8 @@
 #define NELEM(i)	(sizeof(i)/sizeof(*i))
 
 /*
- * Global block
- */
-
-/* Type definitions */
-typedef union {
-	unsigned int val;
-	struct {
-		unsigned host_fifo	:1;
-		unsigned hi		:1;
-		unsigned hvf		:1;
-		unsigned vc		:1;
-		unsigned vs		:1;
-		unsigned		:3;
-		unsigned pe		:1;
-		unsigned tse		:1;
-		unsigned ra		:1;
-		unsigned		:1;
-		unsigned ps0		:1;
-		unsigned		:3;
-		unsigned pf0		:1;
-		unsigned		:1;
-		unsigned ccache0	:1;
-		unsigned		:13;
-	};
-} fimgPipelineStatus;
-
-typedef union {
-	unsigned int val;
-	struct {
-		unsigned		:8;
-		unsigned revision	:8;
-		unsigned minor		:8;
-		unsigned major		:8;
-	};
-} fimgVersion;
-
-/*
  * Host interface
  */
-
-typedef union {
-	unsigned int val;
-	struct {
-		unsigned numoutattrib	:4;
-		unsigned envc		:1;
-		unsigned		:11;
-		unsigned autoinc	:1;
-		unsigned		:7;
-		unsigned idxtype	:2;
-		unsigned		:5;
-		unsigned envb		:1;
-	};
-} fimgHInterface;
 
 typedef union {
 	unsigned int val;
@@ -114,9 +65,6 @@ typedef union {
 	};
 	unsigned int val;
 } fimgAttribute;
-
-inline void fimgDrawArraysBufferedAutoinc(fimgContext *ctx,
-		fimgArray *arrays, unsigned int first, unsigned int count);
 
 /*
  * Primitive Engine
@@ -174,17 +122,6 @@ typedef union {
 /*
  * Per-fragment unit
  */
-
-typedef union {
-	unsigned int val;
-	struct {
-		unsigned min		:12;
-		unsigned		:4;
-		unsigned max		:12;
-		unsigned		:3;
-		unsigned enable		:1;
-	};
-} fimgScissorTestData;
 
 typedef union {
 	unsigned int val;
@@ -331,25 +268,15 @@ struct _fimgTexture {
  * Hardware context
  */
 
-typedef struct {
-	unsigned int intEn;
-	unsigned int intMask;
-	unsigned int intTarget;
-} fimgGlobalContext;
-
 void fimgCreateGlobalContext(fimgContext *ctx);
-void fimgRestoreGlobalState(fimgContext *ctx);
 
 typedef struct {
 	fimgAttribute attrib[FIMG_ATTRIB_NUM];
 	fimgVtxBufAttrib vbctrl[FIMG_ATTRIB_NUM];
 	unsigned int vbbase[FIMG_ATTRIB_NUM];
-	fimgHInterface control;
-	unsigned int indexOffset;
 } fimgHostContext;
 
 void fimgCreateHostContext(fimgContext *ctx);
-void fimgRestoreHostState(fimgContext *ctx);
 
 typedef struct {
 	fimgVertexContext vctx;
@@ -362,7 +289,6 @@ typedef struct {
 } fimgPrimitiveContext;
 
 void fimgCreatePrimitiveContext(fimgContext *ctx);
-void fimgRestorePrimitiveState(fimgContext *ctx);
 
 typedef struct {
 	unsigned int samplePos;
@@ -371,38 +297,37 @@ typedef struct {
 	float dOffUnits;
 	fimgCullingControl cull;
 	fimgClippingControl yClip;
+	fimgLODControl lodGen;
+	fimgClippingControl xClip;
 	float pointWidth;
 	float pointWidthMin;
 	float pointWidthMax;
 	unsigned int spriteCoordAttrib;
 	float lineWidth;
-	fimgLODControl lodGen;
-	fimgClippingControl xClip;
 } fimgRasterizerContext;
 
 void fimgCreateRasterizerContext(fimgContext *ctx);
-void fimgRestoreRasterizerState(fimgContext *ctx);
 
 typedef struct {
-	fimgScissorTestData scY;
-	fimgScissorTestData scX;
 	fimgAlphaTestData alpha;
 	fimgStencilTestData stBack;
-	fimgStencilTestData stFront;
-	fimgDepthTestData depth;
-	fimgBlendControl blend;
 	unsigned int blendColor;
-	fimgFramebufferControl fbctl;
+	fimgBlendControl blend;
 	fimgLogOpControl logop;
 	fimgColorBufMask mask;
+} fimgFragmentContext;
+
+typedef struct {
+	fimgStencilTestData stFront;
+	fimgDepthTestData depth;
 	fimgDepthBufMask dbmask;
+	fimgFramebufferControl fbctl;
 	unsigned int depthAddr;
 	unsigned int colorAddr;
 	unsigned int bufWidth;
-} fimgFragmentContext;
+} fimgProtectedContext;
 
 void fimgCreateFragmentContext(fimgContext *ctx);
-void fimgRestoreFragmentState(fimgContext *ctx);
 
 #ifdef FIMG_FIXED_PIPELINE
 
@@ -516,23 +441,26 @@ typedef struct {
 } fimgCompatContext;
 
 void fimgCreateCompatContext(fimgContext *ctx);
-void fimgRestoreCompatState(fimgContext *ctx);
 void fimgCompatFlush(fimgContext *ctx);
 
 #endif
 
 struct _fimgContext {
-	volatile char *base;
 	int fd;
-	/* Individual contexts */
-	fimgGlobalContext global;
-	fimgHostContext host;
-	fimgPrimitiveContext primitive;
-	fimgRasterizerContext rasterizer;
-	fimgFragmentContext fragment;
+
+	struct {
+		/* Individual contexts */
+		fimgProtectedContext prot;
+		fimgHostContext host;
+		fimgPrimitiveContext primitive;
+		fimgRasterizerContext rasterizer;
+		fimgFragmentContext fragment;
+	} hw;
+
 #ifdef FIMG_FIXED_PIPELINE
 	fimgCompatContext compat;
 #endif
+
 	/* Shared context */
 	unsigned int invalTexCache;
 	unsigned int numAttribs;
@@ -550,93 +478,9 @@ struct _fimgContext {
 	size_t vertexDataSize;
 };
 
-/* Registry accessors */
-static inline void fimgWrite(fimgContext *ctx, unsigned int data, unsigned int addr)
-{
-	volatile unsigned int *reg = (volatile unsigned int *)((volatile char *)ctx->base + addr);
-#ifdef FIMG_DEBUG_HW_LOCK
-	if (!ctx->locked) {
-		LOGE("Tried to access hardware registers without hw lock.");
-		return;
-	}
-#endif
-	*reg = data;
-	__sync_synchronize();
-}
+/* Hardware context */
 
-static inline unsigned int fimgRead(fimgContext *ctx, unsigned int addr)
-{
-	volatile unsigned int *reg = (volatile unsigned int *)((volatile char *)ctx->base + addr);
-	unsigned int val;
-#ifdef FIMG_DEBUG_HW_LOCK
-	if (!ctx->locked) {
-		LOGE("Tried to access hardware registers without hw lock.");
-		return 0xdeaddead;
-	}
-#endif
-	val = *reg;
-	__sync_synchronize();
-	return val;
-}
-
-static inline void fimgWriteF(fimgContext *ctx, float data, unsigned int addr)
-{
-	volatile float *reg = (volatile float *)((volatile char *)ctx->base + addr);
-#ifdef FIMG_DEBUG_HW_LOCK
-	if (!ctx->locked) {
-		LOGE("Tried to access hardware registers without hw lock.");
-		return;
-	}
-#endif
-	*reg = data;
-	__sync_synchronize();
-}
-
-static inline float fimgReadF(fimgContext *ctx, unsigned int addr)
-{
-	volatile float *reg = (volatile float *)((volatile char *)ctx->base + addr);
-	float val;
-#ifdef FIMG_DEBUG_HW_LOCK
-	if (!ctx->locked) {
-		LOGE("Tried to access hardware registers without hw lock.");
-		return 0xdeaddead;
-	}
-#endif
-	val = *reg;
-	__sync_synchronize();
-	return val;
-}
-
-/* Register queue */
 #define FIMG_MAX_QUEUE_LEN	64
-
-static inline void fimgQueueFlush(fimgContext *ctx)
-{
-	unsigned int cnt;
-	unsigned int *ptr;
-
-	if (!ctx->queueLen)
-		return;
-
-	/* Above the maximum length it's more effective to restore the whole
-	 * context than just the changed registers */
-	if (ctx->queueLen == FIMG_MAX_QUEUE_LEN) {
-		fimgRestoreContext(ctx);
-		return;
-	}
-
-	cnt = ctx->queueLen;
-	ptr = ctx->queueStart + 2;
-
-	while (cnt--) {
-		fimgWrite(ctx, ptr[1], ptr[0]);
-		ptr += 2;
-	}
-
-	ctx->queueLen = 0;
-	ctx->queue = ctx->queueStart;
-	ctx->queue[0] = 0;
-}
 
 static inline void fimgQueue(fimgContext *ctx, unsigned int data, unsigned int addr)
 {
@@ -674,44 +518,8 @@ static inline void fimgQueueF(fimgContext *ctx, float data, unsigned int addr)
 	((float *)ctx->queue)[1] = data;
 }
 
-/* Hardware context */
-
-static inline void fimgGetHardware(fimgContext *ctx)
-{
-	int ret;
-
-	ret = fimgAcquireHardwareLock(ctx);
-	if (likely(!ret))
-		return;
-
-	switch (ret) {
-	case 2:
-		/* Fall through */
-	case 1:
-		fimgRestoreContext(ctx);
-		break;
-	default:
-		fprintf(stderr, "FIMG: Could not acquire hardware lock");
-		exit(EBUSY);
-	}
-}
-
-static inline void fimgFlushContext(fimgContext *ctx)
-{
-	if (ctx->invalTexCache) {
-		fimgInvalidateCache(ctx, 0, 3);
-		ctx->invalTexCache = 0;
-	}
-	fimgQueueFlush(ctx);
-#ifdef FIMG_FIXED_PIPELINE
-	fimgCompatFlush(ctx);
-#endif
-}
-
-static inline void fimgPutHardware(fimgContext *ctx)
-{
-	fimgReleaseHardwareLock(ctx);
-}
+extern void fimgQueueFlush(fimgContext *ctx);
+extern void fimgFlushContext(fimgContext *ctx);
 
 extern void fimgDumpState(fimgContext *ctx, unsigned mode, unsigned count, const char *func);
 

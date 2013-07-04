@@ -69,18 +69,8 @@ typedef struct _fimgContext fimgContext;
 	FGHI_PIPELINE_PER_FRAG )
 
 /* Functions */
-uint32_t fimgGetPipelineStatus(fimgContext *ctx);
 int fimgFlush(fimgContext *ctx);
-int fimgSelectiveFlush(fimgContext *ctx, uint32_t mask);
-int fimgInvalidateCache(fimgContext *ctx,
-				unsigned int vtcclear, unsigned int tcclear);
-int fimgFlushCache(fimgContext *ctx,
-				unsigned int ccflush, unsigned int zcflush);
-int fimgWaitForCacheFlush(fimgContext *ctx,
-				unsigned int ccflush, unsigned int zcflush);
 void fimgFinish(fimgContext *ctx);
-void fimgSoftReset(fimgContext *ctx);
-void fimgGetVersion(fimgContext *ctx, int *major, int *minor, int *rev);
 
 /*
  * Host interface
@@ -573,9 +563,6 @@ void fimgSetFrameBufSize(fimgContext *ctx,
 
 fimgContext *fimgCreateContext(void);
 void fimgDestroyContext(fimgContext *ctx);
-void fimgRestoreContext(fimgContext *ctx);
-int fimgAcquireHardwareLock(fimgContext *ctx);
-int fimgReleaseHardwareLock(fimgContext *ctx);
 int fimgDeviceOpen(fimgContext *ctx);
 void fimgDeviceClose(fimgContext *ctx);
 int fimgWaitForFlush(fimgContext *ctx, uint32_t target);

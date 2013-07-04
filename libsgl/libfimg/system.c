@@ -35,9 +35,6 @@
 #include <sys/types.h>
 
 #include "fimg_private.h"
-#include "s3c_g3d.h"
-
-#define FIMG_SFR_SIZE 0x80000
 
 /**
  * Opens G3D device and maps GPU registers into application address space.
@@ -46,21 +43,13 @@
  */
 int fimgDeviceOpen(fimgContext *ctx)
 {
-	ctx->fd = open("/dev/s3c-g3d", O_RDWR | O_SYNC, 0);
+	ctx->fd = open("/dev/dri/card0", O_RDWR | O_SYNC, 0);
 	if(ctx->fd < 0) {
-		LOGE("Couldn't open /dev/s3c-g3d (%s).", strerror(errno));
+		LOGE("Couldn't open /dev/dri/card0 (%s).", strerror(errno));
 		return -errno;
 	}
-#ifndef FIMG_DEBUG_IOMEM_ACCESS
-	ctx->base = mmap(NULL, FIMG_SFR_SIZE, PROT_WRITE | PROT_READ,
-					MAP_SHARED, ctx->fd, 0);
-	if(ctx->base == MAP_FAILED) {
-		LOGE("Couldn't mmap FIMG registers (%s).", strerror(errno));
-		close(ctx->fd);
-		return -errno;
-	}
-#endif
-	LOGD("Opened /dev/s3c-g3d (%d).", ctx->fd);
+
+	LOGD("Opened /dev/dri/card0 (%d).", ctx->fd);
 
 	return 0;
 }
@@ -71,12 +60,9 @@ int fimgDeviceOpen(fimgContext *ctx)
  */
 void fimgDeviceClose(fimgContext *ctx)
 {
-#ifndef FIMG_DEBUG_IOMEM_ACCESS
-	munmap((void *)ctx->base, FIMG_SFR_SIZE);
-#endif
 	close(ctx->fd);
 
-	LOGD("fimg3D: Closed /dev/s3c-g3d (%d).", ctx->fd);
+	LOGD("fimg3D: Closed /dev/dri/card0 (%d).", ctx->fd);
 }
 
 /**
@@ -141,83 +127,8 @@ void fimgDestroyContext(fimgContext *ctx)
 }
 
 /**
- * Restores full hardware context to hardware.
- * @param ctx Hardware context.
- */
-void fimgRestoreContext(fimgContext *ctx)
-{
-//	fprintf(stderr, "fimg: Restoring global state\n"); fflush(stderr);
-	fimgRestoreGlobalState(ctx);
-//	fprintf(stderr, "fimg: Restoring host state\n"); fflush(stderr);
-	fimgRestoreHostState(ctx);
-//	fprintf(stderr, "fimg: Restoring primitive state\n"); fflush(stderr);
-	fimgRestorePrimitiveState(ctx);
-//	fprintf(stderr, "fimg: Restoring rasterizer state\n"); fflush(stderr);
-	fimgRestoreRasterizerState(ctx);
-//	fprintf(stderr, "fimg: Restoring fragment state\n"); fflush(stderr);
-	fimgRestoreFragmentState(ctx);
-#ifdef FIMG_FIXED_PIPELINE
-//	fprintf(stderr, "fimg: Restoring compat state\n"); fflush(stderr);
-	fimgRestoreCompatState(ctx);
-#endif
-
-	ctx->queue = ctx->queueStart;
-	ctx->queue[0] = 0;
-	ctx->queueLen = 0;
-}
-
-/**
 	Power management
 */
-
-/**
- * Claims the hardware for exclusive use, possibly powering it up.
- * @param ctx Hardware context.
- * @return 0 on success, positive if context restore is needed,
- * negative on error.
- */
-int fimgAcquireHardwareLock(fimgContext *ctx)
-{
-	int ret;
-
-	if((ret = ioctl(ctx->fd, S3C_G3D_LOCK, 0)) < 0) {
-		LOGE("Could not acquire the hardware lock");
-		return -1;
-	}
-#ifdef FIMG_DEBUG_IOMEM_ACCESS
-	ctx->base = mmap(NULL, FIMG_SFR_SIZE, PROT_WRITE | PROT_READ,
-					MAP_SHARED, ctx->fd, 0);
-	if(ctx->base == MAP_FAILED) {
-		LOGE("Couldn't mmap FIMG registers (%s).", strerror(errno));
-		close(ctx->fd);
-		return -errno;
-	}
-#endif
-	ctx->locked = 1;
-
-	return ret;
-}
-
-/**
- * Releases the hardware, possibly allowing it to be powered down after
- * finishing any pending work.
- * @param ctx Hardware context.
- * @return 0 on success, negative on error.
- */
-int fimgReleaseHardwareLock(fimgContext *ctx)
-{
-#ifdef FIMG_DEBUG_IOMEM_ACCESS
-	munmap((void *)ctx->base, FIMG_SFR_SIZE);
-#endif
-	if(ioctl(ctx->fd, S3C_G3D_UNLOCK, 0)) {
-		LOGE("Could not release the hardware lock");
-		return -1;
-	}
-
-	ctx->locked = 0;
-
-	return 0;
-}
 
 /**
  * Waits for hardware to flush graphics pipeline.
@@ -227,11 +138,59 @@ int fimgReleaseHardwareLock(fimgContext *ctx)
  */
 int fimgWaitForFlush(fimgContext *ctx, uint32_t target)
 {
-	if(ioctl(ctx->fd, S3C_G3D_FLUSH, target)) {
-		LOGE("Could not flush the hardware pipeline");
-		fimgDumpState(ctx, 0, 0, __func__);
-		return -1;
-	}
+#warning Unimplemented
 
 	return 0;
+}
+
+/* Register queue */
+void fimgQueueFlush(fimgContext *ctx)
+{
+	struct drm_exynos_g3d_submit submit;
+	struct drm_exynos_g3d_request req;
+	int ret;
+
+	if (!ctx->queueLen)
+		return;
+
+	submit.requests = &req;
+	submit.nr_requests = 1;
+
+	/* Above the maximum length it's more effective to restore the whole
+	 * context than just the changed registers */
+	if (ctx->queueLen == FIMG_MAX_QUEUE_LEN) {
+		req.type = G3D_REQUEST_STATE_INIT;
+		req.data = &ctx->hw;
+		req.length = sizeof(ctx->hw);
+
+		ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
+		if (ret < 0)
+			LOGE("G3D_REQUEST_STATE_INIT failed (%d)", ret);
+
+		ctx->queueLen = 0;
+		ctx->queue = ctx->queueStart;
+		ctx->queue[0] = 0;
+
+		return;
+	}
+
+	req.type = G3D_REQUEST_STATE_BUFFER;
+	req.data = ctx->queueStart;
+	req.length = ctx->queueLen * sizeof(*ctx->queueStart) * 2;
+
+	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
+	if (ret < 0)
+		LOGE("G3D_REQUEST_STATE_INIT failed (%d)", ret);
+
+	ctx->queueLen = 0;
+	ctx->queue = ctx->queueStart;
+	ctx->queue[0] = 0;
+}
+
+void fimgFlushContext(fimgContext *ctx)
+{
+	fimgQueueFlush(ctx);
+#ifdef FIMG_FIXED_PIPELINE
+	fimgCompatFlush(ctx);
+#endif
 }
