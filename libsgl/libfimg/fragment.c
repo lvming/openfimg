@@ -23,6 +23,7 @@
 # include <config.h>
 #endif
 
+#include <sys/ioctl.h>
 #include "fimg_private.h"
 
 /**
@@ -414,27 +415,6 @@ void fimgSetZBufWriteMask(fimgContext *ctx, int enable)
 }
 
 /**
- * Controls framebuffer parameters such as pixel format, component swap, etc.
- * @param ctx Hardware context.
- * @param flags Extra flags altering framebuffer operation.
- * @param format Pixel format.
- */
-void fimgSetFrameBufParams(fimgContext *ctx,
-				unsigned int flags, unsigned int format)
-{
-	ctx->hw.prot.fbctl.opaque = 0;
-	ctx->hw.prot.fbctl.alphathreshold = 0;
-	ctx->hw.prot.fbctl.alphaconst = 255;
-	ctx->hw.prot.fbctl.colormode = format;
-#ifdef FIMG_FIXED_PIPELINE
-	FGFP_BITFIELD_SET(ctx->compat.psState.ps,
-			PS_SWAP, !!(flags & FGPF_COLOR_MODE_BGR));
-#endif
-	ctx->fbFlags = flags;
-	fimgQueue(ctx, ctx->hw.prot.fbctl.val, FGPF_FBCTL);
-}
-
-/**
  * Initializes hardware context of per-fragment block.
  * @param ctx Hardware context.
  */
@@ -449,4 +429,48 @@ void fimgCreateFragmentContext(fimgContext *ctx)
 	ctx->hw.fragment.blend.asrcblendfunc = FGPF_BLEND_FUNC_ONE;
 	ctx->hw.fragment.blend.csrcblendfunc = FGPF_BLEND_FUNC_ONE;
 	ctx->hw.prot.fbctl.dither = 1;
+}
+
+/**
+ * Controls framebuffer parameters such as pixel format, component swap, etc.
+ * @param ctx Hardware context.
+ * @param fb Structure containing framebuffer parameters.
+ */
+void fimgSetFramebuffer(fimgContext *ctx, fimgFramebuffer *fb)
+{
+	struct drm_exynos_g3d_submit submit;
+	struct drm_exynos_g3d_request req;
+	struct drm_exynos_g3d_framebuffer g3d_fb;
+	int ret;
+
+	ctx->hw.prot.fbctl.opaque = 0;
+	ctx->hw.prot.fbctl.alphathreshold = 0;
+	ctx->hw.prot.fbctl.alphaconst = 255;
+	ctx->hw.prot.fbctl.colormode = fb->format;
+#ifdef FIMG_FIXED_PIPELINE
+	FGFP_BITFIELD_SET(ctx->compat.psState.ps,
+			PS_SWAP, !!(fb->flags & FGPF_COLOR_MODE_BGR));
+#endif
+	ctx->fbFlags = fb->flags;
+	ctx->fbHeight = fb->height;
+	fimgQueue(ctx, ctx->hw.prot.fbctl.val, FGPF_FBCTL);
+
+	g3d_fb.fbctl = ctx->hw.prot.fbctl.val;
+	g3d_fb.coffset = fb->coffset;
+	g3d_fb.doffset = fb->zoffset;
+	g3d_fb.width = fb->width;
+
+	submit.requests = &req;
+	submit.nr_requests = 1;
+
+	req.type = G3D_REQUEST_FRAMEBUFFER_SETUP;
+	req.framebuffer.flags = fb->flags;
+	req.framebuffer.chandle = fb->chandle;
+	req.framebuffer.zhandle = fb->zhandle;
+	req.length = sizeof(g3d_fb);
+	req.data = &g3d_fb;
+
+	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
+	if (ret < 0)
+		LOGE("G3D_REQUEST_FRAMEBUFFER_SETUP failed (%d)", ret);
 }

@@ -538,7 +538,7 @@ static uint32_t loadShaderBlock(const struct shaderBlock *blk, void *vaddr)
 	const uint32_t *data = blk->data;
 	uint32_t *addr = (uint32_t *)vaddr;
 
-	for (inst = 0; inst < blk->len; inst++)
+	for (inst = 0; inst < blk->len; inst++, addr += 4, data += 4)
 		LOGD("%p: %08x %08x %08x %08x", addr,
 					data[0], data[1], data[2], data[3]);
 #endif
@@ -1066,11 +1066,11 @@ static void loadPixelShader(fimgContext *ctx)
 
 	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
 	if (ret < 0)
-		LOGE("G3D_REQUEST_STATE_INIT failed (%d)", ret);
+		LOGE("G3D_REQUEST_SHADER_PROGRAM failed (%d)", ret);
 #ifdef FIMG_DYNSHADER_DEBUG
 	LOGD("Loading const float");
 #endif
-	req.type = G3D_REQUEST_SHADER_DATA;
+	req.type = G3D_REQUEST_SHADER_DATA_INIT;
 	req.data = (void *)pixelConstFloat.data;
 	req.length = 4 * sizeof(uint32_t) * pixelConstFloat.len;
 	req.shader_data_init.unit = G3D_SHADER_PIXEL;
@@ -1081,7 +1081,7 @@ static void loadPixelShader(fimgContext *ctx)
 
 	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
 	if (ret < 0)
-		LOGE("G3D_REQUEST_STATE_INIT failed (%d)", ret);
+		LOGE("G3D_REQUEST_SHADER_DATA_INIT failed (%d)", ret);
 #ifdef FIMG_DYNSHADER_DEBUG
 	LOGD("Loaded pixel shader");
 #endif

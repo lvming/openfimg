@@ -86,8 +86,6 @@ public:
 	virtual ~FGLRenderSurface()
 	{
 		magic = 0;
-		delete depth;
-		delete color;
 	}
 
 	/**
@@ -96,8 +94,6 @@ public:
 	 * @return EGL_TRUE on success, EGL_FALSE on failure.
 	 */
 	virtual bool allocate(FGLContext *gl) = 0;
-
-	virtual void free(void) = 0;
 
 	/**
 	 * Binds render surface to given rendering context.
@@ -114,12 +110,11 @@ public:
 		if (!color && !allocate(gl))
 			return EGL_FALSE;
 
-		if (color)
-			color->bindContext(gl);
-		if (depth)
-			depth->bindContext(gl);
+		if (color && !color->bindContext(gl))
+			return EGL_FALSE;
+		if (depth && !depth->bindContext(gl))
+			return EGL_FALSE;
 
-		/* TODO - move this to bindContext() of surfaces */
 		fglSetColorBuffer(gl, color, width, height, colorFormat);
 		fglSetDepthStencilBuffer(gl, depth, width, height, depthFormat);
 
@@ -140,7 +135,6 @@ public:
 		if (depth)
 			depth->unbindContext();
 
-		free();
 		ctx = 0;
 	}
 

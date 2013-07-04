@@ -556,8 +556,6 @@ void fimgSetLogicalOpEnable(fimgContext *ctx, int enable);
 void fimgSetColorBufWriteMask(fimgContext *ctx, unsigned int mask);
 void fimgSetStencilBufWriteMask(fimgContext *ctx, int back, unsigned char mask);
 void fimgSetZBufWriteMask(fimgContext *ctx, int enable);
-//void fimgSetFrameBufParams(fimgContext *ctx,
-//				unsigned int flags, unsigned int format);
 void fimgSetFramebuffer(fimgContext *ctx, fimgFramebuffer *fb);
 
 /*

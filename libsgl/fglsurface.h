@@ -62,6 +62,7 @@ public:
 			FGLSurface() :
 				ctx(0),
 				handle(0),
+				fd(-1),
 				offset(0),
 				vaddr(0),
 				size(0) {};
@@ -71,10 +72,10 @@ public:
 	 * @param v Virtual address of the surface.
 	 * @param s Size of the surface in bytes.
 	 */
-			FGLSurface(uint32_t h, off_t o,
+			FGLSurface(uint32_t fd, off_t o,
 				   unsigned long s) :
 				ctx(0),
-				handle(h),
+				fd(fd),
 				offset(o),
 				vaddr(0),
 				size(s) {};
@@ -95,24 +96,32 @@ public:
 	 * finished and written back to the memory. This might include
 	 * waiting for native graphics stack, flushing caches, etc.
 	 */
-	virtual void	flush(void) = 0;
+	virtual void	flush(void) {}
+
 	/**
 	 * Locks the surface for exclusive use.
 	 * @param usage Flags indicating usage.
 	 * @return 0 on success, non-zero on failure.
 	 */
-	virtual int	lock(int usage = 0) = 0;
+	virtual int	lock(int usage = 0)
+	{
+		return 0;
+	}
+
 	/**
 	 * Unlocks the surface.
 	 * @return 0 on success, non-zero on failure.
 	 */
-	virtual int	unlock(void) = 0;
+	virtual int	unlock(void)
+	{
+		return 0;
+	}
 
 	/**
 	 * Checks if the surface is valid.
 	 * @return True if the surface is valid, otherwise false.
 	 */
-	bool	isValid(void) { return handle != 0; };
+	bool	isValid(void) { return fd >= 0; };
 };
 
 /** A class implementing a surface backed by internally allocated memory. */
@@ -126,16 +135,13 @@ public:
 	 * @param size Size of the surface in bytes.
 	 */
 			FGLLocalSurface(unsigned long size);
-	/** Destroys the surface. */
-	virtual		~FGLLocalSurface();
-
-	virtual void	flush(void);
-	virtual int	lock(int usage = 0);
-	virtual int	unlock(void);
 };
 
 /** A class implementing a surface backed by external (native) buffer. */
 class FGLExternalSurface : public FGLSurface {
+protected:
+	virtual bool	allocate(FGLContext *ctx) { return true; }
+
 public:
 	/**
 	 * Creates an external surface.
@@ -143,14 +149,8 @@ public:
 	 * @param p Physical address of the surface.
 	 * @param s Size of the surface in bytes.
 	 */
-			FGLExternalSurface(void *v, uint32_t h,
-					   off_t o, size_t s);
-	/** Destroys the surface. */
-	virtual		~FGLExternalSurface();
-
-	virtual void	flush(void);
-	virtual int	lock(int usage = 0);
-	virtual int	unlock(void);
+			FGLExternalSurface(int fd, off_t o, size_t s) :
+				FGLSurface(fd, o, s) {}
 };
 
 #endif

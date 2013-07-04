@@ -704,7 +704,11 @@ public:
 		this->height = height;
 	}
 
-	virtual ~FGLPbufferSurface() {}
+	virtual ~FGLPbufferSurface()
+	{
+		delete depth;
+		delete color;
+	}
 
 	virtual bool initCheck() const
 	{
@@ -723,7 +727,7 @@ public:
 			return EGL_TRUE;
 
 		color = new FGLLocalSurface(size);
-		if (!color || !color->isValid()) {
+		if (!color) {
 			setError(EGL_BAD_ALLOC);
 			return EGL_FALSE;
 		}
@@ -732,17 +736,11 @@ public:
 			size = width * height * 4;
 
 			depth = new FGLLocalSurface(size);
-			if (!depth || !depth->isValid()) {
+			if (!depth) {
 				setError(EGL_BAD_ALLOC);
 				return EGL_FALSE;
 			}
 		}
-	}
-
-	virtual void free(void)
-	{
-		delete depth;
-		delete color;
 	}
 };
 
@@ -757,11 +755,6 @@ EGLAPI EGLSurface EGLAPIENTRY eglCreateWindowSurface(EGLDisplay dpy,
 
 	if (!fglEGLValidateDisplay(dpy)) {
 		setError(EGL_BAD_DISPLAY);
-		return EGL_NO_SURFACE;
-	}
-
-	if (win == 0) {
-		setError(EGL_BAD_MATCH);
 		return EGL_NO_SURFACE;
 	}
 
@@ -1339,12 +1332,6 @@ EGLAPI EGLBoolean EGLAPIENTRY eglSwapBuffers(EGLDisplay dpy, EGLSurface surface)
 	if (!d->swapBuffers())
 		/* Error code should have been set */
 		return EGL_FALSE;
-
-	/* if it's bound to a context, update the buffer */
-	if (d->ctx != EGL_NO_CONTEXT) {
-		FGLContext *c = (FGLContext *)d->ctx;
-		d->bindContext(c);
-	}
 
 	return EGL_TRUE;
 }

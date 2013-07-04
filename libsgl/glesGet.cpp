@@ -31,6 +31,7 @@
 #include <fcntl.h>
 #include <GLES/gl.h>
 #include <GLES/glext.h>
+#include <drm/drm_fourcc.h>
 #include "glesCommon.h"
 #include "fglobjectmanager.h"
 #include "libfimg/fimg.h"
@@ -84,6 +85,7 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		0,
 		-1,
 		-1,
+		0,
 		0
 	},
 
@@ -106,7 +108,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		2,
 		FGTU_TSTA_TEXTURE_FORMAT_1555,
 		FGPF_COLOR_MODE_555,
-		FGL_PIX_OPAQUE
+		FGL_PIX_OPAQUE,
+		DRM_FORMAT_XRGB1555,
 	},
 	/*
 	 * FGL_PIXFMT_RGB565
@@ -123,7 +126,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		2,
 		FGTU_TSTA_TEXTURE_FORMAT_565,
 		FGPF_COLOR_MODE_565,
-		0
+		0,
+		DRM_FORMAT_RGB565,
 	},
 	/*
 	 * FGL_PIXFMT_ARGB4444
@@ -140,7 +144,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		2,
 		FGTU_TSTA_TEXTURE_FORMAT_4444,
 		FGPF_COLOR_MODE_4444,
-		0
+		0,
+		DRM_FORMAT_ARGB4444,
 	},
 	/*
 	 * FGL_PIXFMT_ARGB1555
@@ -157,7 +162,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		2,
 		FGTU_TSTA_TEXTURE_FORMAT_1555,
 		FGPF_COLOR_MODE_1555,
-		0
+		0,
+		DRM_FORMAT_ARGB1555,
 	},
 	/*
 	 * FGL_PIXFMT_XRGB8888
@@ -174,7 +180,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		4,
 		FGTU_TSTA_TEXTURE_FORMAT_8888,
 		FGPF_COLOR_MODE_0888,
-		FGL_PIX_OPAQUE
+		FGL_PIX_OPAQUE,
+		DRM_FORMAT_XRGB8888,
 	},
 	/*
 	 * FGL_PIXFMT_ARGB8888
@@ -191,7 +198,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		4,
 		FGTU_TSTA_TEXTURE_FORMAT_8888,
 		FGPF_COLOR_MODE_8888,
-		0
+		0,
+		DRM_FORMAT_ARGB8888,
 	},
 	/*
 	 * FGL_PIXFMT_XBGR8888
@@ -208,7 +216,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		4,
 		FGTU_TSTA_TEXTURE_FORMAT_8888,
 		FGPF_COLOR_MODE_0888,
-		FGL_PIX_OPAQUE | FGL_PIX_BGR
+		FGL_PIX_OPAQUE | FGL_PIX_BGR,
+		DRM_FORMAT_XBGR8888,
 	},
 	/*
 	 * FGL_PIXFMT_ABGR8888
@@ -225,7 +234,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		4,
 		FGTU_TSTA_TEXTURE_FORMAT_8888,
 		FGPF_COLOR_MODE_8888,
-		FGL_PIX_BGR
+		FGL_PIX_BGR,
+		DRM_FORMAT_ABGR8888,
 	},
 
 	/*
@@ -247,7 +257,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		2,
 		FGTU_TSTA_TEXTURE_FORMAT_4444,
 		-1,
-		FGL_PIX_ALPHA_LSB
+		FGL_PIX_ALPHA_LSB,
+		DRM_FORMAT_RGBA4444,
 	},
 	/*
 	 * FGL_PIXFMT_RGBA1555
@@ -264,7 +275,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		2,
 		FGTU_TSTA_TEXTURE_FORMAT_1555,
 		-1,
-		FGL_PIX_ALPHA_LSB
+		FGL_PIX_ALPHA_LSB,
+		DRM_FORMAT_RGBA5551,
 	},
 	/*
 	 * FGL_PIXFMT_DEPTH16
@@ -281,7 +293,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		2,
 		FGTU_TSTA_TEXTURE_FORMAT_DEPTHCOMP16,
 		-1,
-		0
+		0,
+		0,
 	},
 	/*
 	 * FGL_PIXFMT_AL88
@@ -298,7 +311,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		2,
 		FGTU_TSTA_TEXTURE_FORMAT_88,
 		-1,
-		0
+		0,
+		0,
 	},
 	/*
 	 * FGL_PIXFMT_L8
@@ -315,7 +329,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		1,
 		FGTU_TSTA_TEXTURE_FORMAT_8,
 		-1,
-		0
+		0,
+		0,
 	},
 
 	/*
@@ -337,7 +352,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		0,
 		FGTU_TSTA_TEXTURE_FORMAT_1BPP,
 		-1,
-		0
+		0,
+		0,
 	},
 	/*
 	 * FGL_PIXFMT_2BPP
@@ -354,7 +370,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		0,
 		FGTU_TSTA_TEXTURE_FORMAT_2BPP,
 		-1,
-		0
+		0,
+		0,
 	},
 	/*
 	 * FGL_PIXFMT_4BPP
@@ -371,7 +388,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		0,
 		FGTU_TSTA_TEXTURE_FORMAT_4BPP,
 		-1,
-		0
+		0,
+		0,
 	},
 	/*
 	 * FGL_PIXFMT_8BPP
@@ -388,7 +406,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		0,
 		FGTU_TSTA_TEXTURE_FORMAT_8BPP,
 		-1,
-		0
+		0,
+		DRM_FORMAT_C8,
 	},
 	/*
 	 * FGL_PIXFMT_S3TC
@@ -405,7 +424,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		0,
 		FGTU_TSTA_TEXTURE_FORMAT_S3TC,
 		-1,
-		0
+		0,
+		0,
 	},
 
 	/*
@@ -427,7 +447,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		4,
 		FGTU_TSTA_TEXTURE_FORMAT_Y1VY0U,
 		-1,
-		0
+		0,
+		DRM_FORMAT_UYVY,
 	},
 	/*
 	 * FGL_PIXFMT_VY1UY0
@@ -444,7 +465,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		4,
 		FGTU_TSTA_TEXTURE_FORMAT_VY1UY0,
 		-1,
-		0
+		0,
+		DRM_FORMAT_YUYV,
 	},
 	/*
 	 * FGL_PIXFMT_Y1UY0V
@@ -461,7 +483,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		4,
 		FGTU_TSTA_TEXTURE_FORMAT_Y1UY0V,
 		-1,
-		0
+		0,
+		DRM_FORMAT_VYUY,
 	},
 	/*
 	 * FGL_PIXFMT_UY1VY0
@@ -478,7 +501,8 @@ const FGLPixelFormat FGLPixelFormat::table[] = {
 		4,
 		FGTU_TSTA_TEXTURE_FORMAT_UY1VY0,
 		-1,
-		0
+		0,
+		DRM_FORMAT_YVYU,
 	},
 };
 

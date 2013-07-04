@@ -126,6 +126,7 @@ void fimgSetYClip(fimgContext *ctx, unsigned int ymin, unsigned int ymax)
 	fimgQueue(ctx, ctx->hw.rasterizer.yClip.val, FGRA_YCLIP);
 }
 
+#if 0
 /**
  * Configures generation of LOD coefficients for selected attribute.
  * @param ctx Hardware context.
@@ -143,6 +144,7 @@ void fimgSetLODControl(fimgContext *ctx, unsigned int attrib,
 
 	fimgQueue(ctx, ctx->hw.rasterizer.lodGen.val, FGRA_LODCTL);
 }
+#endif
 
 /**
  * Configures X coordinate range for early fragment clipping.

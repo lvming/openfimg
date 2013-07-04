@@ -107,18 +107,6 @@ typedef union {
 	};
 } fimgClippingControl;
 
-typedef union {
-	unsigned int val;
-	struct {
-		struct {
-			unsigned lod	:1;
-			unsigned ddx	:1;
-			unsigned ddy	:1;
-		} coef[8];
-		unsigned		:8;
-	};
-} fimgLODControl;
-
 /*
  * Per-fragment unit
  */
@@ -263,15 +251,15 @@ struct _fimgTexture {
 
 void fimgCreateGlobalContext(fimgContext *ctx);
 
-typedef struct {
-	fimgAttribute attrib[FIMG_ATTRIB_NUM];
-	fimgVtxBufAttrib vbctrl[FIMG_ATTRIB_NUM];
-	unsigned int vbbase[FIMG_ATTRIB_NUM];
+typedef struct __attribute__ ((__packed__)) {
+	fimgAttribute attrib[FIMG_ATTRIB_NUM + 1];
+	fimgVtxBufAttrib vbctrl[FIMG_ATTRIB_NUM + 1];
+	unsigned int vbbase[FIMG_ATTRIB_NUM + 1];
 } fimgHostContext;
 
 void fimgCreateHostContext(fimgContext *ctx);
 
-typedef struct {
+typedef struct __attribute__ ((__packed__)) {
 	fimgVertexContext vctx;
 	float ox;
 	float oy;
@@ -283,14 +271,14 @@ typedef struct {
 
 void fimgCreatePrimitiveContext(fimgContext *ctx);
 
-typedef struct {
+typedef struct __attribute__ ((__packed__)) {
 	unsigned int samplePos;
 	unsigned int dOffEn;
 	float dOffFactor;
 	float dOffUnits;
 	fimgCullingControl cull;
 	fimgClippingControl yClip;
-	fimgLODControl lodGen;
+	unsigned int lodGen;
 	fimgClippingControl xClip;
 	float pointWidth;
 	float pointWidthMin;
@@ -301,7 +289,7 @@ typedef struct {
 
 void fimgCreateRasterizerContext(fimgContext *ctx);
 
-typedef struct {
+typedef struct __attribute__ ((__packed__)) {
 	fimgAlphaTestData alpha;
 	fimgStencilTestData stBack;
 	unsigned int blendColor;
@@ -310,7 +298,7 @@ typedef struct {
 	fimgColorBufMask mask;
 } fimgFragmentContext;
 
-typedef struct {
+typedef struct __attribute__ ((__packed__)) {
 	fimgStencilTestData stFront;
 	fimgDepthTestData depth;
 	fimgDepthBufMask dbmask;
@@ -441,7 +429,7 @@ void fimgCompatFlush(fimgContext *ctx);
 struct _fimgContext {
 	int fd;
 
-	struct {
+	struct __attribute__ ((__packed__)) fimgHWContext {
 		/* Individual contexts */
 		fimgProtectedContext prot;
 		fimgHostContext host;
@@ -512,7 +500,6 @@ static inline void fimgQueueF(fimgContext *ctx, float data, unsigned int addr)
 }
 
 extern void fimgQueueFlush(fimgContext *ctx);
-extern void fimgFlushContext(fimgContext *ctx);
 
 extern void fimgDumpState(fimgContext *ctx, unsigned mode, unsigned count, const char *func);
 

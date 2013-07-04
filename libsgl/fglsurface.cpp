@@ -51,22 +51,29 @@ bool FGLSurface::bindContext(FGLContext *ctx)
 {
 	int ret;
 
-	if (ctx)
+	if (this->ctx)
 		return false;
 
-	if (fd < 0 || !allocate(ctx))
-		return false;
-
-	ret = fimgImportGEM(ctx->fimg, fd, &handle);
-	if (ret)
-		return false;
+	if (fd < 0) {
+		if (!allocate(ctx)) {
+			LOGE("failed to allocate backing storage");
+			return false;
+		}
+	} else {
+		ret = fimgImportGEM(ctx->fimg, fd, &handle);
+		if (ret) {
+			LOGE("failed to import GEM");
+			return false;
+		}
+	}
 
 	vaddr = fimgMapGEM(ctx->fimg, handle, size);
-	if (!vaddr)
+	if (!vaddr) {
+		LOGE("failed to map GEM");
 		return false;
+	}
 
 	this->ctx = ctx;
-
 	return true;
 }
 
@@ -87,14 +94,6 @@ FGLLocalSurface::FGLLocalSurface(unsigned long req_size)
 	size = req_size;
 }
 
-FGLLocalSurface::~FGLLocalSurface()
-{
-	if (!isValid())
-		return;
-
-	fimgDestroyGEMHandle(ctx->fimg, handle);
-}
-
 bool FGLLocalSurface::allocate(FGLContext *ctx)
 {
 	int ret;
@@ -111,45 +110,4 @@ bool FGLLocalSurface::allocate(FGLContext *ctx)
 
 	fd = ret;
 	return true;
-}
-
-int FGLLocalSurface::lock(int usage)
-{
-	return 0;
-}
-
-int FGLLocalSurface::unlock(void)
-{
-	return 0;
-}
-
-void FGLLocalSurface::flush(void)
-{
-
-}
-
-FGLExternalSurface::FGLExternalSurface(void *v, uint32_t h, off_t o, size_t s) :
-	FGLSurface(h, o, s)
-{
-
-}
-
-FGLExternalSurface::~FGLExternalSurface()
-{
-
-}
-
-int FGLExternalSurface::lock(int usage)
-{
-	return 0;
-}
-
-int FGLExternalSurface::unlock(void)
-{
-	return 0;
-}
-
-void FGLExternalSurface::flush(void)
-{
-
 }

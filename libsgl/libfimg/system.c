@@ -29,6 +29,8 @@
 #include <string.h>
 #include <unistd.h>
 
+#include <xf86drm.h>
+
 #include <sys/ioctl.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
@@ -43,7 +45,7 @@
  */
 int fimgDeviceOpen(fimgContext *ctx)
 {
-	ctx->fd = open("/dev/dri/card0", O_RDWR | O_SYNC, 0);
+	ctx->fd = drmOpen("exynos", NULL);
 	if(ctx->fd < 0) {
 		LOGE("Couldn't open /dev/dri/card0 (%s).", strerror(errno));
 		return -errno;
@@ -78,15 +80,15 @@ fimgContext *fimgCreateContext(void)
 	fimgContext *ctx;
 	uint32_t *queue;
 
-	if ((ctx = malloc(sizeof(*ctx))) == NULL)
+	if ((ctx = calloc(1, sizeof(*ctx))) == NULL)
 		return NULL;
 
-	if ((queue = malloc(2*(FIMG_MAX_QUEUE_LEN + 1)*sizeof(uint32_t))) == NULL) {
+	queue = calloc(FIMG_MAX_QUEUE_LEN + 1, 2 * sizeof(uint32_t));
+	if (!queue) {
 		free(ctx);
 		return NULL;
 	}
-
-	memset(ctx, 0, sizeof(fimgContext));
+	ctx->queueStart = queue;
 
 	if(fimgDeviceOpen(ctx)) {
 		free(queue);
@@ -94,7 +96,6 @@ fimgContext *fimgCreateContext(void)
 		return NULL;
 	}
 
-	fimgCreateGlobalContext(ctx);
 	fimgCreateHostContext(ctx);
 	fimgCreatePrimitiveContext(ctx);
 	fimgCreateRasterizerContext(ctx);
@@ -103,9 +104,15 @@ fimgContext *fimgCreateContext(void)
 	fimgCreateCompatContext(ctx);
 #endif
 
-	ctx->queue = queue;
-	ctx->queue[0] = 0;
-	ctx->queueStart = queue;
+	LOGE("sizeof(ctx->hw.prot) = %u", sizeof(ctx->hw.prot));
+	LOGE("sizeof(ctx->hw.host) = %u", sizeof(ctx->hw.host));
+	LOGE("sizeof(ctx->hw.primitive) = %u", sizeof(ctx->hw.primitive));
+	LOGE("sizeof(ctx->hw.rasterizer) = %u", sizeof(ctx->hw.rasterizer));
+	LOGE("sizeof(ctx->hw.fragment) = %u", sizeof(ctx->hw.fragment));
+
+	/* Initialize registers */
+	ctx->queueLen = FIMG_MAX_QUEUE_LEN;
+	fimgQueueFlush(ctx);
 
 	return ctx;
 }
@@ -163,6 +170,16 @@ int fimgWaitForFlush(fimgContext *ctx, uint32_t target)
 	return 0;
 }
 
+/**
+ * Makes sure that any rendering that is in progress finishes and any data
+ * in caches is saved to buffers in memory.
+ * @param ctx Hardware context.
+ */
+void fimgFinish(fimgContext *ctx)
+{
+	fimgWaitForFlush(ctx, FGHI_PIPELINE_ALL);
+}
+
 /* Register queue */
 void fimgQueueFlush(fimgContext *ctx)
 {
@@ -185,7 +202,7 @@ void fimgQueueFlush(fimgContext *ctx)
 
 		ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
 		if (ret < 0)
-			LOGE("G3D_REQUEST_STATE_INIT failed (%d)", ret);
+			LOGE("G3D_REQUEST_STATE_INIT failed (%d)", errno);
 
 		ctx->queueLen = 0;
 		ctx->queue = ctx->queueStart;
@@ -200,19 +217,11 @@ void fimgQueueFlush(fimgContext *ctx)
 
 	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
 	if (ret < 0)
-		LOGE("G3D_REQUEST_STATE_INIT failed (%d)", ret);
+		LOGE("G3D_REQUEST_STATE_INIT failed (%d)", errno);
 
 	ctx->queueLen = 0;
 	ctx->queue = ctx->queueStart;
 	ctx->queue[0] = 0;
-}
-
-void fimgFlushContext(fimgContext *ctx)
-{
-	fimgQueueFlush(ctx);
-#ifdef FIMG_FIXED_PIPELINE
-	fimgCompatFlush(ctx);
-#endif
 }
 
 /*
@@ -274,12 +283,27 @@ void fimgUnmapGEM(fimgContext *ctx, void *addr, unsigned long size)
 
 int fimgExportGEM(fimgContext *ctx, unsigned int handle)
 {
-	// TODO
-	return 0;
+	int ret;
+	int fd;
+
+	ret = drmPrimeHandleToFD(ctx->fd, handle, 0, &fd);
+	if (ret < 0) {
+		LOGE("failed to export GEM (%d)", ret);
+		return ret;
+	}
+
+	return fd;
 }
 
 int fimgImportGEM(fimgContext *ctx, int fd, unsigned int *handle)
 {
-	// TODO
+	int ret;
+
+	ret = drmPrimeFDToHandle(ctx->fd, fd, handle);
+	if (ret < 0) {
+		LOGE("failed to import GEM (%d)", ret);
+		return ret;
+	}
+
 	return 0;
 }

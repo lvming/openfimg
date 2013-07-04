@@ -35,7 +35,9 @@
 #include <sys/mman.h>
 #include <sys/types.h>
 
-#include <linux/fb.h>
+#include <xf86drm.h>
+#include <xf86drmMode.h>
+#include <drm/exynos_drm.h>
 
 #include <EGL/egl.h>
 #include <EGL/eglext.h>
@@ -52,6 +54,8 @@
 /*
  * Configurations available for direct rendering into frame buffer
  */
+
+#define BUFFER_COUNT	2
 
 /*
  * In the lists below, attributes names MUST be sorted.
@@ -230,12 +234,169 @@ const int gPlatformConfigsNum = NELEM(gPlatformConfigs);
  * framebuffer device.
  */
 class FGLFramebufferWindowSurface : public FGLRenderSurface {
-	int	bytesPerPixel;
-	int	fd;
-	FGLLocalSurface *buffers;
+	int fd;
+	drmModeConnector *conn;
+	drmModeEncoder *enc;
+	FGLSurface *surfaces[BUFFER_COUNT];
+	uint32_t handles[BUFFER_COUNT];
+	uint32_t fb[BUFFER_COUNT];
+	unsigned int frontIdx;
+	unsigned int backIdx;
+	int bytesPerPixel;
+	unsigned long size;
+	uint32_t kmsFormat;
 
-	void		*vbase;
-	unsigned long	vlen;
+	drmModeConnector *findConnector(drmModeRes *res, uint32_t id)
+	{
+		drmModeConnector *conn;
+		unsigned int i;
+
+		/* iterate all connectors */
+		for (i = 0; i < res->count_connectors; ++i) {
+			conn = drmModeGetConnector(fd, res->connectors[i]);
+			if (!conn)
+				continue;
+
+			if (conn->connector_id == id)
+				break;
+
+			drmModeFreeConnector(conn);
+		}
+
+		if (i == res->count_connectors)
+			return NULL;
+
+		return conn;
+	}
+
+	drmModeEncoder *findEncoder(drmModeRes *res, uint32_t id)
+	{
+		drmModeEncoder *enc;
+		unsigned int i;
+
+		/* iterate all connectors */
+		for (i = 0; i < res->count_encoders; ++i) {
+			enc = drmModeGetEncoder(fd, res->encoders[i]);
+			if (!enc)
+				continue;
+
+			if (enc->encoder_id == id)
+				break;
+
+			drmModeFreeEncoder(enc);
+		}
+
+		if (i == res->count_encoders)
+			return NULL;
+
+		return enc;
+	}
+
+	int createBuffer(unsigned int *handle)
+	{
+		struct drm_exynos_gem_create req;
+		int ret;
+
+		req.size = size;
+		req.flags = EXYNOS_BO_CACHABLE;
+		req.handle = 0;
+
+		ret = ioctl(fd, DRM_IOCTL_EXYNOS_GEM_CREATE, &req);
+		if (ret < 0) {
+			LOGE("failed to create GEM (%d)", ret);
+			return ret;
+		}
+
+		*handle = req.handle;
+		return 0;
+	}
+
+	int exportBuffer(unsigned int handle)
+	{
+		int ret;
+		int bufFd;
+
+		ret = drmPrimeHandleToFD(fd, handle, 0, &bufFd);
+		if (ret < 0) {
+			LOGE("failed to export GEM (%d)", ret);
+			return ret;
+		}
+
+		return bufFd;
+	}
+
+	void releaseBuffer(unsigned int handle)
+	{
+		struct drm_gem_close req;
+		int ret;
+
+		req.handle = handle;
+
+		ret = ioctl(fd, DRM_IOCTL_GEM_CLOSE, &req);
+		if (ret < 0)
+			LOGE("failed to destroy GEM (%d)", ret);
+	}
+
+	bool allocateBuffers()
+	{
+		unsigned int i;
+
+		for (i = 0; i < BUFFER_COUNT; ++i) {
+			int fbFd, ret;
+			uint32_t h[4], p[4], o[4];
+
+			ret = createBuffer(&handles[i]);
+			if (ret < 0) {
+				LOGE("failed to create buffer");
+				return false;
+			}
+
+			fbFd = exportBuffer(handles[i]);
+			if (fd < 0) {
+				LOGE("failed to export buffer");
+				releaseBuffer(handles[i]);
+				freeBuffers();
+				return false;
+			}
+
+			h[0] = handles[i];
+			p[0] = bytesPerPixel * width;
+			o[0] = 0;
+
+			ret = drmModeAddFB2(fd, width, height, kmsFormat,
+							h, p, o, &fb[i], 0);
+			if (ret < 0) {
+				LOGE("failed to add framebuffer");
+				close(fbFd);
+				releaseBuffer(handles[i]);
+				freeBuffers();
+				return false;
+			}
+
+			surfaces[i] = new FGLExternalSurface(fbFd, 0, size);
+			if (!surfaces[i] || !surfaces[i]->isValid()) {
+				LOGE("failed to create surface");
+				freeBuffers();
+				return false;
+			}
+		}
+
+		return true;
+	}
+
+	void freeBuffers()
+	{
+		unsigned int i;
+
+		for (i = 0; i < BUFFER_COUNT; ++i) {
+			if (!surfaces[i])
+				break;
+
+			delete surfaces[i];
+			drmModeRmFB(fd, fb[i]);
+			releaseBuffer(handles[i]);
+		}
+	}
 
 public:
 	/**
@@ -249,21 +410,122 @@ public:
 	 */
 	FGLFramebufferWindowSurface(EGLDisplay dpy, uint32_t config,
 				uint32_t pixelFormat, uint32_t depthFormat,
-				int fileDesc) :
+				uint32_t connector) :
 		FGLRenderSurface(dpy, config, pixelFormat, depthFormat),
-		bytesPerPixel(0),
-		fd(fileDesc)
+		bytesPerPixel(0)
 	{
+		const FGLPixelFormat *pix;
+		drmModeRes *res;
+		unsigned int i;
+
+		pix = FGLPixelFormat::get(pixelFormat);
+		if (!pix || !pix->fourCC) {
+			LOGE("invalid pixel format (%u)", pixelFormat);
+			goto err_free_conn;
+		}
+
+		memset(surfaces, 0, sizeof(surfaces));
+
+		fd = drmOpen("exynos", NULL);
+		if (fd < 0) {
+			LOGE("failed to open DRM device: %s", strerror(errno));
+			setError(EGL_BAD_ACCESS);
+			return;
+		}
+
+		/* retrieve resources */
+		res = drmModeGetResources(fd);
+		if (!res) {
+			LOGE("could not retrieve DRM resources: %s",
+							strerror(errno));
+			setError(EGL_BAD_ACCESS);
+			goto err_close;
+		}
+
+		conn = findConnector(res, connector);
+		if (!conn) {
+			LOGE("could not find requested connector (%u)",
+								connector);
+			setError(EGL_BAD_NATIVE_WINDOW);
+			goto err_free_res;
+		}
+
+		/* check if there is at least one valid mode */
+		if (conn->count_modes == 0) {
+			LOGE("no valid mode for connector %u\n",
+							conn->connector_id);
+			setError(EGL_BAD_NATIVE_WINDOW);
+			goto err_free_conn;
+		}
+
+		enc = findEncoder(res, conn->encoder_id);
+		if (!enc) {
+			LOGE("could not find encoder for connector");
+			setError(EGL_BAD_NATIVE_WINDOW);
+			goto err_free_conn;
+		}
+
+		width = conn->modes[0].hdisplay;
+		height = conn->modes[0].vdisplay;
+		bytesPerPixel = pix->pixelSize;
+		size = width * height * bytesPerPixel;
+		kmsFormat = pix->fourCC;
+
+		if (!allocateBuffers()) {
+			LOGE("failed to allocate frame buffers");
+			setError(EGL_BAD_ALLOC);
+			goto err_free_enc;
+		}
+
+		drmModeFreeResources(res);
+		return;
+
+		err_free_enc:
+			drmModeFreeEncoder(enc);
+		err_free_conn:
+			drmModeFreeConnector(conn);
+		err_free_res:
+			drmModeFreeResources(res);
+		err_close:
+			close(fd);
+
+		fd = -1;
 	}
 
 	/** Class destructor. */
 	~FGLFramebufferWindowSurface()
 	{
+		if (!initCheck())
+			return;
+
+		freeBuffers();
+		drmModeFreeEncoder(enc);
+		drmModeFreeConnector(conn);
+		close(fd);
+
+		delete depth;
 	}
 
 	virtual bool swapBuffers()
 	{
-		/* TODO: Swap buffers */
+		drmVBlank vbl;
+		FGLContext *ctx = this->ctx;
+
+		unbindContext();
+
+		vbl.request.type = DRM_VBLANK_RELATIVE;
+		vbl.request.sequence = 1;
+
+		drmModePageFlip(fd, enc->crtc_id, fb[frontIdx], 0, 0);
+		drmWaitVBlank(fd, &vbl);
+
+		frontIdx = (frontIdx + 1) % BUFFER_COUNT;
+		backIdx = (backIdx + 1) % BUFFER_COUNT;
+
+		color = surfaces[backIdx];
+
+		if (ctx && !bindContext(ctx))
+			return false;
 
 		return true;
 	}
@@ -275,25 +537,19 @@ public:
 
 			delete depth;
 			depth = new FGLLocalSurface(size);
-			if (!depth || !depth->isValid()) {
+			if (!depth) {
 				setError(EGL_BAD_ALLOC);
 				return false;
 			}
 		}
 
-		/* TODO: Allocate backing storage for color buffer */
-
+		color = surfaces[backIdx];
 		return true;
-	}
-
-	virtual void free()
-	{
-		/* TODO: ree backing storage */
 	}
 
 	virtual bool initCheck() const
 	{
-		return vbase != NULL;
+		return fd >= 0;
 	}
 
 	virtual EGLint getSwapBehavior() const
@@ -301,87 +557,6 @@ public:
 		return EGL_BUFFER_DESTROYED;
 	}
 };
-
-/** 32-bit pixel formats supported by framebuffer. */
-static uint32_t framebufferFormats32bpp[] = {
-	FGL_PIXFMT_XRGB8888,
-	FGL_PIXFMT_ARGB8888,
-	FGL_PIXFMT_XBGR8888,
-	FGL_PIXFMT_ABGR8888
-};
-
-/** 16-bit pixel formats supported by framebuffer. */
-static uint32_t framebufferFormats16bpp[] = {
-	FGL_PIXFMT_XRGB1555,
-	FGL_PIXFMT_RGB565,
-	FGL_PIXFMT_ARGB4444,
-	FGL_PIXFMT_ARGB1555
-};
-
-/**
- * Finds pixel format compatible with given framebuffer configuration.
- * @param vinfo Framebuffer configuration.
- * @param fglFormat Pointer pointing where to store the found format.
- * @param formats Arrays of formats to check for compatibility.
- * @param count Count of formats in formats array.
- * @return True if appropriate format was found, otherwise false.
- */
-static bool fglFindCompatiblePixelFormat(const fb_var_screeninfo *vinfo,
-		uint32_t *fglFormat, const uint32_t *formats, uint32_t count)
-{
-	while (count--) {
-		uint32_t fmt = *(formats++);
-		const FGLPixelFormat *pix = FGLPixelFormat::get(fmt);
-
-		if (vinfo->red.offset != pix->comp[FGL_COMP_RED].pos)
-			continue;
-		if (vinfo->red.length != pix->comp[FGL_COMP_RED].size)
-			continue;
-		if (vinfo->green.offset != pix->comp[FGL_COMP_GREEN].pos)
-			continue;
-		if (vinfo->green.length != pix->comp[FGL_COMP_GREEN].size)
-			continue;
-		if (vinfo->blue.offset != pix->comp[FGL_COMP_BLUE].pos)
-			continue;
-		if (vinfo->blue.length != pix->comp[FGL_COMP_BLUE].size)
-			continue;
-		if (vinfo->transp.offset != pix->comp[FGL_COMP_ALPHA].pos)
-			continue;
-		if (vinfo->transp.length != pix->comp[FGL_COMP_ALPHA].size)
-			continue;
-
-		*fglFormat = fmt;
-		return true;
-	}
-
-	return false;
-}
-
-/**
- * Finds internal pixel format corresponding to framebuffer pixel format.
- * @param vinfo Framebuffer configuration.
- * @param fglFormat Pointer to variable where internal pixel format shall
- * be stored.
- * @return True if corresponding format was found, otherwise false.
- */
-static bool fglNativeToFGLPixelFormat(const fb_var_screeninfo *vinfo,
-							uint32_t *fglFormat)
-{
-	switch(vinfo->bits_per_pixel) {
-	case 32:
-		return fglFindCompatiblePixelFormat(vinfo,
-					fglFormat, framebufferFormats32bpp,
-					NELEM(framebufferFormats32bpp));
-	case 16:
-		return fglFindCompatiblePixelFormat(vinfo,
-					fglFormat, framebufferFormats16bpp,
-					NELEM(framebufferFormats16bpp));
-	default:
-		break;
-	}
-
-	return false;
-}
 
 /**
  * Creates native window surface based on user parameters.
@@ -397,22 +572,8 @@ FGLRenderSurface *platformCreateWindowSurface(EGLDisplay dpy,
 		uint32_t config, uint32_t pixelFormat, uint32_t depthFormat,
 		EGLNativeWindowType window)
 {
-	fb_var_screeninfo vinfo;
-	int fd = (int)window;
-
-	/* TODO: Get screen information */
-
-	if (!fglNativeToFGLPixelFormat(&vinfo, &pixelFormat)) {
-		setError(EGL_BAD_MATCH);
-		return NULL;
-	}
-
-	if (!fglEGLValidatePixelFormat(config, pixelFormat)) {
-		setError(EGL_BAD_MATCH);
-		return NULL;
-	}
-
-	return new FGLFramebufferWindowSurface(dpy, config, pixelFormat, depthFormat, fd);
+	return new FGLFramebufferWindowSurface(dpy, config,
+				pixelFormat, depthFormat, (uint32_t)window);
 }
 
 #define EGLFunc	__eglMustCastToProperFunctionPointerType

@@ -30,12 +30,3 @@
  * Global hardware
  */
 
-/**
- * Makes sure that any rendering that is in progress finishes and any data
- * in caches is saved to buffers in memory.
- * @param ctx Hardware context.
- */
-void fimgFinish(fimgContext *ctx)
-{
-	fimgWaitForFlush(ctx, FGHI_PIPELINE_ALL);
-}

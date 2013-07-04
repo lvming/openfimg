@@ -40,6 +40,16 @@
  */
 
 /**
+ * Sets output attribute count of host interface.
+ * @param ctx Hardware context.
+ * @param count Attribute count.
+ */
+void fimgSetAttribCount(fimgContext *ctx, unsigned char count)
+{
+	ctx->numAttribs = count;
+}
+
+/**
  * This function specifies the property of attribute
  * @param attribIdx the index of attribute, which is in [0-15]
  * @param AttribInfo fimgAttribute
@@ -1538,7 +1548,7 @@ static void submitDraw(fimgContext *ctx, uint32_t count)
 
 	req.type = G3D_REQUEST_DRAW_BUFFER;
 	req.data = ctx->vertexData;
-	req.length = ctx->vertexDataSize;
+	req.length = (ctx->vertexDataSize + 31) & ~31;
 	req.draw.count = count;
 
 	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
@@ -1613,9 +1623,10 @@ void fimgDrawArrays(fimgContext *ctx, unsigned int mode,
 	if (!copied)
 		return;
 
-	fimgFlushContext(ctx);
+#ifdef FIMG_FIXED_PIPELINE
+	fimgCompatFlush(ctx);
+#endif
 	fimgSetVertexContext(ctx, mode);
-
 	setupAttributes(ctx, arrays);
 #ifdef FIMG_DUMP_STATE_BEFORE_DRAW
 	fimgDumpState(ctx, mode, count, __func__);
@@ -1623,6 +1634,7 @@ void fimgDrawArrays(fimgContext *ctx, unsigned int mode,
 
 	do {
 		setupVertexBuffer(ctx);
+		fimgQueueFlush(ctx);
 		submitDraw(ctx, copied);
 		copied = primitiveHandler[mode].direct(ctx,
 							arrays, &first, &count);
@@ -1665,9 +1677,10 @@ void fimgDrawElementsUByteIdx(fimgContext *ctx, unsigned int mode,
 	if (!copied)
 		return;
 
-	fimgFlushContext(ctx);
+#ifdef FIMG_FIXED_PIPELINE
+	fimgCompatFlush(ctx);
+#endif
 	fimgSetVertexContext(ctx, mode);
-
 	setupAttributes(ctx, arrays);
 #ifdef FIMG_DUMP_STATE_BEFORE_DRAW
 	fimgDumpState(ctx, mode, count, __func__);
@@ -1675,6 +1688,7 @@ void fimgDrawElementsUByteIdx(fimgContext *ctx, unsigned int mode,
 
 	do {
 		setupVertexBuffer(ctx);
+		fimgQueueFlush(ctx);
 		submitDraw(ctx, copied);
 		copied = primitiveHandler[mode].indexed_8(ctx,
 						arrays, indices, &pos, &count);
@@ -1717,9 +1731,10 @@ void fimgDrawElementsUShortIdx(fimgContext *ctx, unsigned int mode,
 	if (!copied)
 		return;
 
-	fimgFlushContext(ctx);
+#ifdef FIMG_FIXED_PIPELINE
+	fimgCompatFlush(ctx);
+#endif
 	fimgSetVertexContext(ctx, mode);
-
 	setupAttributes(ctx, arrays);
 #ifdef FIMG_DUMP_STATE_BEFORE_DRAW
 	fimgDumpState(ctx, mode, count, __func__);
@@ -1727,6 +1742,7 @@ void fimgDrawElementsUShortIdx(fimgContext *ctx, unsigned int mode,
 
 	do {
 		setupVertexBuffer(ctx);
+		fimgQueueFlush(ctx);
 		submitDraw(ctx, copied);
 		copied = primitiveHandler[mode].indexed_16(ctx,
 						arrays, indices, &pos, &count);
