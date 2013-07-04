@@ -453,6 +453,7 @@ void fimgSetFramebuffer(fimgContext *ctx, fimgFramebuffer *fb)
 #endif
 	ctx->fbFlags = fb->flags;
 	ctx->fbHeight = fb->height;
+	ctx->flipY = fb->flipY;
 	fimgQueue(ctx, ctx->hw.prot.fbctl.val, FGPF_FBCTL);
 
 	g3d_fb.fbctl = ctx->hw.prot.fbctl.val;

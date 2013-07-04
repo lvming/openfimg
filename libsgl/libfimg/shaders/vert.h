@@ -46,9 +46,4 @@ static const unsigned int vert_footer[] = {
 	0x00000000, 0x00000000, 0x1e000000, 0x00000000,
 };
 
-static const unsigned int vert_clear[] = {
-	0x00000000, 0x00000000, 0x00f800e4, 0x00000000,
-	0x00000000, 0x00000000, 0x1e000000, 0x00000000,
-};
-
 #endif

@@ -712,10 +712,7 @@ public:
 
 	virtual bool initCheck() const
 	{
-		if (depthFormat && (!depth || !depth->isValid()))
-			return false;
-
-		return color && color->isValid();
+		return true;
 	}
 
 	virtual bool allocate(FGLContext *ctx)

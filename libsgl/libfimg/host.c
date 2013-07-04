@@ -1752,7 +1752,8 @@ void fimgCreateHostContext(fimgContext *ctx)
 	template.srcy = 1;
 	template.srcz = 2;
 	template.srcw = 3;
+	template.lastattr = 1;
 
-	for(i = 0; i < FIMG_ATTRIB_NUM; i++)
+	for(i = 0; i < FIMG_ATTRIB_NUM + 1; i++)
 		ctx->hw.host.attrib[i].val = template.val;
 }

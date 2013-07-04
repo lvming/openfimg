@@ -30,6 +30,7 @@
 #include <string.h>
 #include <unistd.h>
 #include <fcntl.h>
+#include <poll.h>
 
 #include <sys/ioctl.h>
 #include <sys/mman.h>
@@ -245,6 +246,8 @@ class FGLFramebufferWindowSurface : public FGLRenderSurface {
 	int bytesPerPixel;
 	unsigned long size;
 	uint32_t kmsFormat;
+	bool needsModeset;
+	volatile bool pageFlipDone;
 
 	drmModeConnector *findConnector(drmModeRes *res, uint32_t id)
 	{
@@ -398,6 +401,41 @@ class FGLFramebufferWindowSurface : public FGLRenderSurface {
 		}
 	}
 
+	static void pageFlipHandler(int fd, unsigned int frame,
+				unsigned int sec, unsigned int usec, void *data)
+	{
+		volatile bool *done = (bool *)data;
+
+		*done = true;
+	}
+
+	bool waitForPageFlip(void)
+	{
+		drmEventContext evctx;
+		struct pollfd pollFd;
+		int ret;
+
+		memset(&pollFd, 0 , sizeof(pollFd));
+		pollFd.fd = fd;
+		pollFd.events = POLLIN;
+
+		memset (&evctx, 0, sizeof evctx);
+		evctx.version = DRM_EVENT_CONTEXT_VERSION;
+		evctx.page_flip_handler = pageFlipHandler;
+
+		do {
+			ret = poll(&pollFd, 1, 100);
+			if (ret < 0)
+				return false;
+
+			ret = drmHandleEvent (fd, &evctx);
+			if (ret < 0)
+				return false;
+		} while (!pageFlipDone);
+
+		return true;
+	}
+
 public:
 	/**
 	 * Class constructor.
@@ -412,7 +450,9 @@ public:
 				uint32_t pixelFormat, uint32_t depthFormat,
 				uint32_t connector) :
 		FGLRenderSurface(dpy, config, pixelFormat, depthFormat),
-		bytesPerPixel(0)
+		backIdx(0),
+		bytesPerPixel(0),
+		needsModeset(true)
 	{
 		const FGLPixelFormat *pix;
 		drmModeRes *res;
@@ -508,16 +548,20 @@ public:
 
 	virtual bool swapBuffers()
 	{
-		drmVBlank vbl;
 		FGLContext *ctx = this->ctx;
 
 		unbindContext();
 
-		vbl.request.type = DRM_VBLANK_RELATIVE;
-		vbl.request.sequence = 1;
-
-		drmModePageFlip(fd, enc->crtc_id, fb[frontIdx], 0, 0);
-		drmWaitVBlank(fd, &vbl);
+		if (needsModeset) {
+			drmModeSetCrtc(fd, enc->crtc_id, fb[backIdx],
+				0, 0, &conn->connector_id, 1, &conn->modes[0]);
+			needsModeset = false;
+		} else {
+			pageFlipDone = false;
+			drmModePageFlip(fd, enc->crtc_id, fb[backIdx],
+				DRM_MODE_PAGE_FLIP_EVENT, (void *)&pageFlipDone);
+			waitForPageFlip();
+		}
 
 		frontIdx = (frontIdx + 1) % BUFFER_COUNT;
 		backIdx = (backIdx + 1) % BUFFER_COUNT;
@@ -544,6 +588,7 @@ public:
 		}
 
 		color = surfaces[backIdx];
+		needsModeset = true;
 		return true;
 	}
 
