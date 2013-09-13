@@ -135,6 +135,8 @@ void fimgSetupTexture(fimgContext *ctx, fimgTexture *texture, unsigned unit)
 	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_G3D_SUBMIT, &submit);
 	if (ret < 0)
 		LOGE("G3D_REQUEST_TEXTURE_SETUP failed (%d)", ret);
+
+	texture->flags &= ~G3D_TEXTURE_DIRTY;
 }
 
 /**
