@@ -301,7 +301,7 @@ class FGLFramebufferWindowSurface : public FGLRenderSurface {
 		int ret;
 
 		req.size = size;
-		req.flags = EXYNOS_BO_CACHABLE;
+		req.flags = EXYNOS_BO_UNMAPPED | EXYNOS_BO_CACHABLE;
 		req.handle = 0;
 
 		ret = ioctl(fd, DRM_IOCTL_EXYNOS_GEM_CREATE, &req);

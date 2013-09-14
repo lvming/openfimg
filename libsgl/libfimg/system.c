@@ -222,7 +222,7 @@ int fimgCreateGEM(fimgContext *ctx, unsigned long size, unsigned int *handle)
 	int ret;
 
 	req.size = size;
-	req.flags = EXYNOS_BO_CACHABLE;
+	req.flags = EXYNOS_BO_UNMAPPED | EXYNOS_BO_CACHABLE;
 	req.handle = 0;
 
 	ret = ioctl(ctx->fd, DRM_IOCTL_EXYNOS_GEM_CREATE, &req);
