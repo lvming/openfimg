@@ -80,12 +80,7 @@ public:
 				vaddr(0),
 				size(s) {};
 	/** Destroys the surface. */
-	virtual		~FGLSurface()
-	{
-		unbindContext();
-		if (fd >= 0)
-			close(fd);
-	}
+	virtual ~FGLSurface();
 
 	bool bindContext(FGLContext *ctx);
 	void unbindContext(void);

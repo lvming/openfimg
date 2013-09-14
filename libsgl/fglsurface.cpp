@@ -67,10 +67,12 @@ bool FGLSurface::bindContext(FGLContext *ctx)
 		}
 	}
 
-	vaddr = fimgMapGEM(ctx->fimg, handle, size);
 	if (!vaddr) {
-		LOGE("failed to map GEM");
-		return false;
+		vaddr = fimgMapGEM(ctx->fimg, handle, size);
+		if (!vaddr) {
+			LOGE("failed to map GEM");
+			return false;
+		}
 	}
 
 	this->ctx = ctx;
@@ -82,11 +84,19 @@ void FGLSurface::unbindContext(void)
 	if (!ctx)
 		return;
 
-	munmap(vaddr, size);
 	fimgDestroyGEMHandle(ctx->fimg, handle);
 
 	ctx = 0;
 	handle = 0;
+}
+
+FGLSurface::~FGLSurface(void)
+{
+	unbindContext();
+	if (vaddr)
+		munmap(vaddr, size);
+	if (fd >= 0)
+		close(fd);
 }
 
 FGLLocalSurface::FGLLocalSurface(unsigned long req_size)
