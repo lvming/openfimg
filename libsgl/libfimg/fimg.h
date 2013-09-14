@@ -570,7 +570,6 @@ int fimgWaitForFlush(fimgContext *ctx, uint32_t target);
 int fimgCreateGEM(fimgContext *ctx, unsigned long size, unsigned int *handle);
 void fimgDestroyGEMHandle(fimgContext *ctx, unsigned int handle);
 void *fimgMapGEM(fimgContext *ctx, unsigned int handle, unsigned long size);
-void fimgUnmapGEM(fimgContext *ctx, void *addr, unsigned long size);
 int fimgExportGEM(fimgContext *ctx, unsigned int handle);
 int fimgImportGEM(fimgContext *ctx, int fd, unsigned int *handle);
 

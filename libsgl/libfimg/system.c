@@ -264,11 +264,6 @@ void *fimgMapGEM(fimgContext *ctx, unsigned int handle, unsigned long size)
 	return (void *)(unsigned long)req.mapped;
 }
 
-void fimgUnmapGEM(fimgContext *ctx, void *addr, unsigned long size)
-{
-	munmap(addr, size);
-}
-
 int fimgExportGEM(fimgContext *ctx, unsigned int handle)
 {
 	int ret;
