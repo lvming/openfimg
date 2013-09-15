@@ -963,8 +963,11 @@ GL_API void GL_APIENTRY glDrawArrays (GLenum mode, GLint first, GLsizei count)
 	* as the buffered geometry transfer code doesn't get well
 	* with them.
 	*/
-		const uint8_t indices[2] = { count - 1, 0 };
-		fimgDrawElementsUByteIdx(ctx->fimg,
+		uint16_t indices[2];
+		
+		indices[0] = count - 1;
+		indices[1] = 0;
+		fimgDrawElementsUShortIdx(ctx->fimg,
 						fglMode, arrays, 2, indices);
 	}
 }

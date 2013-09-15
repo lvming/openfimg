@@ -738,6 +738,8 @@ public:
 				return EGL_FALSE;
 			}
 		}
+
+		return EGL_TRUE;
 	}
 };
 

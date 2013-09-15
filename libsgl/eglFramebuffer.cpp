@@ -252,7 +252,7 @@ class FGLFramebufferWindowSurface : public FGLRenderSurface {
 	drmModeConnector *findConnector(drmModeRes *res, uint32_t id)
 	{
 		drmModeConnector *conn;
-		unsigned int i;
+		int i;
 
 		/* iterate all connectors */
 		for (i = 0; i < res->count_connectors; ++i) {
@@ -275,7 +275,7 @@ class FGLFramebufferWindowSurface : public FGLRenderSurface {
 	drmModeEncoder *findEncoder(drmModeRes *res, uint32_t id)
 	{
 		drmModeEncoder *enc;
-		unsigned int i;
+		int i;
 
 		/* iterate all connectors */
 		for (i = 0; i < res->count_encoders; ++i) {
@@ -456,7 +456,6 @@ public:
 	{
 		const FGLPixelFormat *pix;
 		drmModeRes *res;
-		unsigned int i;
 
 		pix = FGLPixelFormat::get(pixelFormat);
 		if (!pix || !pix->fourCC) {
